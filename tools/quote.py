@@ -44,6 +44,10 @@ def _session():
     return s
 
 
+def target_reached(price, target, direction="up"):
+    return price <= target if direction == "down" else price >= target
+
+
 def code_prefix(symbol: str) -> str:
     """给股票/基金代码加正确的交易所前缀（支持沪/深/北交所及港交所）。"""
     s = (symbol or "").strip()

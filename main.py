@@ -5,6 +5,7 @@ import os
 import sys
 import argparse
 from dotenv import load_dotenv
+from web import DEFAULT_PORT
 
 load_dotenv()
 
@@ -81,7 +82,7 @@ def schedule_mode():
     start_scheduler()
 
 
-def web_mode(port=5000):
+def web_mode(port=DEFAULT_PORT):
     from web.app import app
     # 默认仅绑定本机，避免局域网内任何人访问无鉴权的写接口
     host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
@@ -94,7 +95,7 @@ def main():
     parser.add_argument("--monitor", action="store_true")
     parser.add_argument("--schedule", action="store_true")
     parser.add_argument("--web", action="store_true")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
 
     args = parser.parse_args()
 

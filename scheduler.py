@@ -14,12 +14,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from agents import create_investment_agent, chat, RiskMonitor
 from tools.notify import send_serverchan, send_wechat_bot
-from tools.portfolio_tracker import record_daily_snapshot
+from tools.portfolio_tracker import SnapshotQuoteError, record_daily_snapshot
+from tools.trading_calendar import MARKET_TZ, RISK_CHECK_TIMES, is_trading_day
 
 
 def generate_daily_report():
     """生成每日投资简报（每天 17:00 执行）"""
-    print(f"\n[{datetime.now()}] 开始生成每日投资简报...")
+    print(f"\n[{datetime.now(MARKET_TZ)}] 开始生成每日投资简报...")
 
     executor = create_investment_agent()
     report = chat(executor, """
@@ -35,7 +36,7 @@ def generate_daily_report():
     print(report)
 
     # 推送通知
-    title = f"📊 {datetime.now().strftime('%m月%d日')} A股日报"
+    title = f"📊 {datetime.now(MARKET_TZ).strftime('%m月%d日')} A股日报"
     if os.getenv("SERVERCHAN_KEY"):
         send_serverchan(title, report)
     elif os.getenv("WECHAT_WEBHOOK"):
@@ -49,7 +50,7 @@ _alert_cooldown = {}
 def _should_notify(alert) -> bool:
     """判断是否需要发送通知（同一预警当天只发一次，除非级别升级）"""
     global _alert_cooldown
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(MARKET_TZ).strftime("%Y-%m-%d")
 
     # 生成唯一 key：股票 + 预警类型关键词
     stock = alert.get("stock", "unknown")
@@ -110,13 +111,17 @@ def check_risk():
         elif os.getenv("WECHAT_WEBHOOK"):
             send_wechat_bot(message)
     elif critical_alerts:
-        print(f"[{datetime.now().strftime('%H:%M')}] 有预警但今日已通知过，跳过推送")
+        print(f"[{datetime.now(MARKET_TZ).strftime('%H:%M')}] 有预警但今日已通知过，跳过推送")
 
 
 def record_snapshot():
     """记录每日持仓快照（收盘后执行）"""
-    print(f"\n[{datetime.now()}] 记录持仓快照...")
-    snapshot = record_daily_snapshot()
+    print(f"\n[{datetime.now(MARKET_TZ)}] 记录持仓快照...")
+    try:
+        snapshot = record_daily_snapshot()
+    except SnapshotQuoteError as exc:
+        print(exc)
+        return
     if snapshot:
         print(f"  总市值: {snapshot['total_value']:.2f}元, 盈亏: {snapshot['profit_pct']:+.2f}%")
     else:
@@ -125,47 +130,27 @@ def record_snapshot():
 
 def start_scheduler():
     """启动定时任务"""
-    scheduler = BlockingScheduler()
+    scheduler = BlockingScheduler(timezone=MARKET_TZ)
 
-    # 每个交易日 17:00 生成日报
-    scheduler.add_job(
-        generate_daily_report,
-        'cron',
-        day_of_week='mon-fri',
-        hour=17,
-        minute=0,
-        id='daily_report'
-    )
+    def on_trading_day(task):
+        if is_trading_day(datetime.now(MARKET_TZ).date()):
+            task()
 
-    # 交易时间每30分钟检查风险（9:30-15:00）
-    scheduler.add_job(
-        check_risk,
-        'cron',
-        day_of_week='mon-fri',
-        hour='9-14',
-        minute='0,30',
-        id='risk_check'
-    )
+    def morning_overview():
+        print(chat(create_investment_agent(), "给我看看今天的市场概况和热门股票"))
 
-    # 开盘前市场概览（9:20）
-    scheduler.add_job(
-        lambda: print(chat(create_investment_agent(), "给我看看今天的市场概况和热门股票")),
-        'cron',
-        day_of_week='mon-fri',
-        hour=9,
-        minute=20,
-        id='morning_overview'
+    jobs = [
+        ("daily_report", generate_daily_report, 17, 0),
+        ("morning_overview", morning_overview, 9, 20),
+        ("portfolio_snapshot", record_snapshot, 15, 10),
+    ]
+    jobs.extend(
+        (f"risk_check_{slot:%H%M}", check_risk, slot.hour, slot.minute)
+        for slot in RISK_CHECK_TIMES
     )
-
-    # 收盘后记录持仓快照（15:10）
-    scheduler.add_job(
-        record_snapshot,
-        'cron',
-        day_of_week='mon-fri',
-        hour=15,
-        minute=10,
-        id='portfolio_snapshot'
-    )
+    for job_id, task, hour, minute in jobs:
+        scheduler.add_job(on_trading_day, "cron", args=[task], day_of_week="mon-fri",
+                          hour=hour, minute=minute, id=job_id)
 
     print("📅 定时任务已启动:")
     print("  - 每日 9:20 盘前概览")

@@ -278,7 +278,7 @@ def backtest_dca_strategy(symbol: str, interval_days: int = 22, amount_per_time:
             price = closes[i]
             buy_shares = int(amount_per_time / price / 100) * 100
             if buy_shares < 100:
-                buy_shares = 100
+                continue
             actual_cost = buy_shares * price
             total_cost += actual_cost
             total_shares += buy_shares
@@ -286,6 +286,9 @@ def backtest_dca_strategy(symbol: str, interval_days: int = 22, amount_per_time:
 
             # 记录每个定投日的组合价值
             portfolio_values.append(total_shares * price)
+
+        if not trades:
+            return result + "预算不足以在任何定投日买入一手。"
 
         # 最终结果
         final_price = closes[-1]
@@ -296,7 +299,8 @@ def backtest_dca_strategy(symbol: str, interval_days: int = 22, amount_per_time:
         # 买入持有对比
         buy_hold_shares = int(total_cost / closes[0] / 100) * 100
         buy_hold_value = buy_hold_shares * final_price
-        buy_hold_return = (buy_hold_value / (buy_hold_shares * closes[0]) - 1) * 100
+        buy_hold_cash = total_cost - buy_hold_shares * closes[0]
+        buy_hold_return = ((buy_hold_value + buy_hold_cash) / total_cost - 1) * 100
 
         result += f"【定投结果】\n"
         result += f"  定投次数: {len(trades)}次\n"

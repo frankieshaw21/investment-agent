@@ -136,9 +136,10 @@ def create_investment_agent():
 
     tools = ALL_TOOLS + [search_my_knowledge, save_note]
 
-    # Inject current time + 实时持仓 into prompt（不再写死持仓）
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M (周%w)")
-    prompt = SYSTEM_PROMPT.format(current_time=current_time, holdings=_load_holdings_text())
+    def prompt(state):
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M (周%w)")
+        system = SYSTEM_PROMPT.format(current_time=current_time, holdings=_load_holdings_text())
+        return [SystemMessage(content=system), *state["messages"]]
 
     agent = create_react_agent(
         llm,

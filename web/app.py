@@ -8,6 +8,8 @@ import math
 import threading
 import uuid
 from datetime import datetime
+from ipaddress import ip_address
+from pathlib import Path
 
 # Fix proxy issues
 for key in list(os.environ.keys()):
@@ -22,10 +24,14 @@ from flask import Flask, render_template, request, jsonify, g
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+from dotenv import load_dotenv, set_key
+
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_ENV_FILE)
 
 from tools import quote as _quote
+from tools.portfolio_tracker import SnapshotQuoteError, record_daily_snapshot
+from tools.trading_calendar import MARKET_TZ, RISK_CHECK_TIMES, is_trading_day
 
 app = Flask(__name__)
 
@@ -71,10 +77,11 @@ def _release_data_write_lock(_error=None):
 
 def get_agent():
     global _agent_executor
-    if _agent_executor is None:
-        from agents import create_investment_agent
-        _agent_executor = create_investment_agent()
-    return _agent_executor
+    with _DATA_WRITE_LOCK:
+        if _agent_executor is None:
+            from agents import create_investment_agent
+            _agent_executor = create_investment_agent()
+        return _agent_executor
 
 
 def _tencent_request(codes: list) -> dict:
@@ -112,7 +119,7 @@ def _parse_stock(fields):
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", can_configure_deepseek=_local_settings_request())
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -243,17 +250,11 @@ def api_sector_flow():
                 sectors.append({
                     "name": sector_name,
                     "change_pct": data["change_pct"],
-                    "flow": data.get("amount", 0),  # 成交额作为资金流向指标
+                    "flow": data.get("amount", 0) / 10_000,  # 万元转亿元
                 })
 
-        # Sort by change_pct descending
-        sectors.sort(key=lambda x: x["change_pct"], reverse=True)
-
-        # Show top 5 gainers + top 5 losers
-        if len(sectors) > 10:
-            top5 = sectors[:5]
-            bottom5 = sectors[-5:]
-            sectors = top5 + bottom5
+        sectors.sort(key=lambda row: row["flow"], reverse=True)
+        sectors = sectors[:10]
 
         return jsonify({"sectors": sectors})
     except Exception as e:
@@ -702,22 +703,18 @@ def api_daily_news():
 
         # 6) 排序：相关 > 重磅 > 时间
         news_list.sort(key=lambda x: (x["related"], x["hot"], x["ts"]), reverse=True)
-        news_list = news_list[:count]
-
-        # 7) AI 判级：持仓相关 + 全市场疑似重磅，合并去重后判断（控制成本）
         if with_ai:
-            # 持仓相关与全市场重磅各留配额，避免相关新闻挤占、漏判重磅
-            related_c = [n for n in news_list if n["related"]]
-            hot_c = [n for n in news_list if n["hot"] and not n["related"]]
-            candidates = []
-            seen_t = set()
-            for n in related_c[:8] + hot_c[:8]:
-                if n["title"] not in seen_t:
-                    candidates.append(n)
-                    seen_t.add(n["title"])
-            _analyze_news_sentiment(candidates[:14])
-            # AI 精排可能改变 related 标记，重新排序保证展示顺序正确
+            # 先从完整新闻池保留全市场重磅配额，再截取展示列表。
+            hot_quota = min(6, count // 2)
+            hot = [n for n in news_list if n["hot"] and not n["related"]][:hot_quota]
+            hot_titles = {n["title"] for n in hot}
+            others = [n for n in news_list if n["title"] not in hot_titles]
+            news_list = others[:count - len(hot)] + hot
+            related = [n for n in news_list if n["related"]][:8]
+            _analyze_news_sentiment(related + hot)
             news_list.sort(key=lambda x: (x["related"], x["hot"], x["ts"]), reverse=True)
+        else:
+            news_list = news_list[:count]
 
         # 8) 持仓情绪概览：只统计“与持仓/自选相关”的已判级新闻，才代表“对你的影响”
         counts = {"非常利好": 0, "利好": 0, "中性": 0, "利空": 0, "非常利空": 0}
@@ -728,7 +725,7 @@ def api_daily_news():
         bull = counts["非常利好"] * 2 + counts["利好"]
         bear = counts["非常利空"] * 2 + counts["利空"]
         if graded == 0:
-            mood = "无相关"
+            mood = "未判级" if any(n["related"] for n in news_list) else "无相关"
         else:
             mood = "偏多" if bull > bear else ("偏空" if bear > bull else "中性")
 
@@ -790,6 +787,10 @@ def api_bank_sector():
                 if name not in config["keywords"]:
                     config["keywords"].append(name)
             sectors_config.append(config)
+
+        if not sectors_config:
+            return jsonify({"sector": {"change_pct": 0}, "key_stocks": [], "news": [],
+                            "analysis": "", "all_sectors": []})
 
         all_codes = sorted({code for sector in sectors_config for code in sector.get("stocks", [])})
 
@@ -913,14 +914,23 @@ def api_bank_sector():
         return jsonify({"error": str(e)}), 500
 
 
+def _realized_profit():
+    return sum(t.get("profit", 0) for t in _load_trades() if t.get("action") == "sell")
+
+
 @app.route("/api/portfolio", methods=["GET"])
 def api_portfolio():
     from agents import RiskMonitor
     monitor = RiskMonitor()
-    summary = monitor.get_portfolio_summary()
+    data = monitor.get_portfolio_data()
+    summary = monitor.get_portfolio_summary(data)
+    totals = data["totals"]
+    realized = _realized_profit()
+    totals["realized"] = realized
+    totals["cumulative"] = realized + totals["profit"] if totals["profit"] is not None else None
     # 首页不展示本接口的 alerts；默认跳过昂贵的整份自选预警计算。
     alerts = monitor.check_all() if request.args.get("include_alerts") == "1" else []
-    return jsonify({"summary": summary, "alerts": alerts})
+    return jsonify({"summary": summary, "alerts": alerts, **data})
 
 
 @app.route("/api/profit-summary", methods=["GET"])
@@ -928,27 +938,30 @@ def api_profit_summary():
     """Get realized + unrealized profit summary"""
     try:
         # Realized profit (from sell trades)
-        trades = _load_trades()
-        realized = sum(t.get("profit", 0) for t in trades if t.get("action") == "sell" and "profit" in t)
+        realized = _realized_profit()
 
         # Unrealized profit (current positions); share the 15-second quote cache
         # with portfolio/watchlist/signals instead of issuing another raw request.
         portfolio = _load_portfolio_data()
         unrealized = 0
+        missing_quotes = []
         if portfolio:
             symbols = [_market_symbol(item["code"], item.get("market")) for item in portfolio]
             quotes = _quote.get_quotes(symbols)
             for item, symbol in zip(portfolio, symbols):
                 fields = quotes.get(symbol)
                 price = _fields_info(fields).get("price", 0) if fields else 0
-                if price > 0:
+                if math.isfinite(price) and price > 0:
                     unrealized += (price - item["cost"]) * item["shares"]
+                else:
+                    missing_quotes.append(symbol)
 
         total = realized + unrealized
         return jsonify({
             "realized": round(realized, 2),
-            "unrealized": round(unrealized, 2),
-            "total": round(total, 2),
+            "unrealized": None if missing_quotes else round(unrealized, 2),
+            "total": None if missing_quotes else round(total, 2),
+            "missing_quotes": missing_quotes,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -975,6 +988,20 @@ def api_portfolio_list():
     return jsonify({"portfolio": data})
 
 
+def _positive_shares(value):
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        quantity = Decimal(str(value))
+    except InvalidOperation:
+        raise ValueError("数量必须为正整数") from None
+    if not quantity.is_finite() or quantity <= 0 or quantity != quantity.to_integral_value():
+        raise ValueError("数量必须为正整数")
+    if quantity.adjusted() > 15 or quantity > 9007199254740991:
+        raise ValueError("数量超出可精确表示的范围")
+    return int(quantity)
+
+
 @app.route("/api/portfolio/add", methods=["POST"])
 def api_portfolio_add():
     """新增持仓等价于新增一笔买入交易，保持交易账本为唯一数量/成本来源。"""
@@ -983,8 +1010,11 @@ def api_portfolio_add():
     if not re.fullmatch(r"\d{6}", code):
         return jsonify({"error": "code 必须是6位数字"}), 400
     try:
+        shares = _positive_shares(data.get("shares"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
         cost = float(data.get("cost"))
-        shares = int(data.get("shares"))
         stop_loss = float(data.get("stop_loss", cost * 0.9))
         take_profit = float(data.get("take_profit", cost * 1.3))
     except (TypeError, ValueError, OverflowError):
@@ -1047,7 +1077,7 @@ def api_portfolio_update():
 
     try:
         requested_cost = float(data.get("cost", item["cost"]))
-        requested_shares = int(data.get("shares", item["shares"]))
+        requested_shares = _positive_shares(data.get("shares", item["shares"]))
         if not math.isfinite(requested_cost) or requested_cost <= 0 or requested_shares <= 0:
             raise ValueError
         if requested_cost != float(item["cost"]) or requested_shares != int(item["shares"]):
@@ -1067,7 +1097,7 @@ def api_portfolio_update():
 
 @app.route("/api/portfolio/delete", methods=["POST"])
 def api_portfolio_delete():
-    """仅允许删除无交易账本来源的孤立持仓，避免之后被历史交易复活。"""
+    """撤销单笔误录或删除未进入账本的旧持仓。"""
     data = request.get_json(silent=True) or {}
     code = str(data.get("code") or "").strip()
     if not code:
@@ -1076,11 +1106,19 @@ def api_portfolio_delete():
     portfolio = _load_portfolio_data()
     if not any(item.get("code") == code for item in portfolio):
         return jsonify({"error": f"{code} not found"}), 404
-    if any(item.get("code") == code for item in _load_json_file(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.json"), [])):
-        return jsonify({"error": "该持仓由交易账本维护，请新增卖出交易完成清仓"}), 409
 
-    _save_json_file(PORTFOLIO_FILE, [item for item in portfolio if item.get("code") != code])
+    trades = _load_trades()
+    matching_trades = [trade for trade in trades if trade.get("code") == code]
+    if not matching_trades:
+        _save_json_file(PORTFOLIO_FILE, [item for item in portfolio if item.get("code") != code])
+    elif len(matching_trades) == 1 and matching_trades[0].get("action") == "buy":
+        try:
+            _commit_trade_state([trade for trade in trades if trade.get("code") != code])
+        except ValueError as exc:
+            return jsonify({"error": f"无法撤销该持仓：{exc}"}), 409
+    else:
+        return jsonify({"error": "该证券有多笔或非买入记录，请在「交易记录」中编辑或删除误录的交易。"}), 409
+
     return jsonify({"success": True})
 
 
@@ -1148,8 +1186,8 @@ def _optional_float(value):
     if value in (None, ""):
         return None
     number = float(value)
-    if not math.isfinite(number):
-        raise ValueError("数值必须是有限数字")
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError("价格和涨跌预警必须是有限正数")
     return number
 
 
@@ -1174,6 +1212,7 @@ def api_stock_search():
     """按部分证券名称、拼音或代码搜索 A股/港股/ETF 候选。"""
     import json as json_mod
     query = request.args.get("q", "").strip()
+    portfolio_only = request.args.get("scope") == "portfolio"
     if not query:
         return jsonify({"results": []})
     if len(query) > 30:
@@ -1201,6 +1240,8 @@ def api_stock_search():
                 continue
             market, code, name, pinyin, security_type = fields[:5]
             if market not in ("sh", "sz", "bj", "hk") or security_type not in allowed_types:
+                continue
+            if portfolio_only and (market == "hk" or security_type == "ZS" or not re.fullmatch(r"\d{6}", code)):
                 continue
             identity = f"{market}:{code}"
             if identity in seen or not _valid_symbol(code):
@@ -1280,7 +1321,9 @@ def api_watchlist():
         if quote_available:
             if target_price:
                 target_distance_pct = (target_price / price - 1) * 100
-                if price >= target_price:
+                if item.get("target_direction") == "down":
+                    target_distance_pct *= -1
+                if _quote.target_reached(price, target_price, item.get("target_direction")):
                     alerts.append({"kind": "target", "label": "已达到目标价"})
             if stop_loss:
                 stop_distance_pct = (price / stop_loss - 1) * 100
@@ -1360,7 +1403,7 @@ def api_watchlist():
 @app.route("/api/watchlist/add", methods=["POST"])
 def api_watchlist_add():
     data = request.get_json(silent=True) or {}
-    code = data.get("code", "").strip()
+    code = str(data.get("code") or "").strip()
     if not _valid_symbol(code):
         return jsonify({"error": "代码必须是5位港股或6位A股/ETF数字代码"}), 400
     market = str(data.get("market") or "").strip().lower()
@@ -1369,18 +1412,26 @@ def api_watchlist_add():
     if any(_watch_symbol(item) == symbol for item in watchlist):
         return jsonify({"error": f"{symbol.upper()} already in watchlist"}), 400
 
+    try:
+        thresholds = {
+            key: _optional_float(data.get(key))
+            for key in ("target_price", "stop_loss", "alert_up_pct", "alert_down_pct")
+        }
+    except (TypeError, ValueError, OverflowError):
+        return jsonify({"error": "价格和涨跌预警必须是有限正数"}), 400
+    if "target_direction" in data:
+        if data["target_direction"] not in ("up", "down"):
+            return jsonify({"error": "目标价方向必须为 up 或 down"}), 400
+        thresholds["target_direction"] = data["target_direction"]
     fields = _quote.get_quotes([symbol]).get(symbol)
     info = _fields_info(fields) if fields else {}
     item = {
         "code": code,
         "market": symbol[:2],
         "name": info.get("name") or data.get("name") or code,
-        "group": (data.get("group") or "默认").strip()[:20],
-        "reason": (data.get("reason") or "").strip()[:200],
-        "target_price": _optional_float(data.get("target_price")),
-        "stop_loss": _optional_float(data.get("stop_loss")),
-        "alert_up_pct": _optional_float(data.get("alert_up_pct")),
-        "alert_down_pct": _optional_float(data.get("alert_down_pct")),
+        "group": str(data.get("group") or "默认").strip()[:20],
+        "reason": str(data.get("reason") or "").strip()[:200],
+        **thresholds,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
@@ -1407,6 +1458,10 @@ def api_watchlist_update():
     item = candidates[0] if candidates else None
     if not item:
         return jsonify({"error": f"{code} not found"}), 404
+    if "target_direction" in data:
+        if data["target_direction"] not in ("up", "down"):
+            return jsonify({"error": "目标价方向必须为 up 或 down"}), 400
+        item["target_direction"] = data["target_direction"]
     for key in ("group", "reason"):
         if key in data:
             item[key] = str(data.get(key) or "").strip()[:200 if key == "reason" else 20]
@@ -1415,7 +1470,7 @@ def api_watchlist_update():
             if key in data:
                 item[key] = _optional_float(data.get(key))
     except (TypeError, ValueError):
-        return jsonify({"error": "价格和涨跌预警必须是数字"}), 400
+        return jsonify({"error": "价格和涨跌预警必须是有限正数"}), 400
     item["updated_at"] = datetime.now().isoformat(timespec="seconds")
     _save_watchlist(watchlist)
     return jsonify({"success": True, "item": item})
@@ -1480,6 +1535,10 @@ def api_watchlist_batch():
             if operation.get("remove") is True:
                 watchlist.remove(item)
                 continue
+            if "target_direction" in operation:
+                if operation["target_direction"] not in ("up", "down"):
+                    return jsonify({"error": "目标价方向必须为 up 或 down"}), 400
+                item["target_direction"] = operation["target_direction"]
             for key, limit in (("group", 20), ("reason", 200)):
                 if key in operation:
                     item[key] = str(operation.get(key) or "").strip()[:limit]
@@ -1619,19 +1678,21 @@ def api_portfolio_attribution():
     try:
         portfolio = _load_portfolio_data()
         trades = _load_trades()
-        quotes = _quote.get_quotes([x["code"] for x in portfolio]) if portfolio else {}
+        symbols = [_market_symbol(item["code"], item.get("market")) for item in portfolio]
+        quotes = _quote.get_quotes(symbols) if symbols else {}
         by_code = {}
         for trade in trades:
             code = trade.get("code", "")
             row = by_code.setdefault(code, {"code": code, "name": trade.get("name", code), "realized": 0.0, "unrealized": 0.0})
             if trade.get("action") == "sell":
                 row["realized"] += float(trade.get("profit", 0) or 0)
-        for item in portfolio:
+        for item, symbol in zip(portfolio, symbols):
             row = by_code.setdefault(item["code"], {"code": item["code"], "name": item.get("name", item["code"]), "realized": 0.0, "unrealized": 0.0})
-            fields = quotes.get(_quote.code_prefix(item["code"]))
+            fields = quotes.get(symbol)
             price = _fields_info(fields).get("price", 0) if fields else 0
-            if price:
-                row["unrealized"] = (price - item["cost"]) * item["shares"]
+            if not math.isfinite(price) or price <= 0:
+                return jsonify({"error": f"{symbol} 行情缺失，暂无法计算完整归因"}), 503
+            row["unrealized"] = (price - item["cost"]) * item["shares"]
         contributions = []
         for row in by_code.values():
             row["realized"] = round(row["realized"], 2)
@@ -1681,24 +1742,38 @@ def _collect_alerts():
     symbols = [_watch_symbol(x) for x in watchlist]
     quotes = _quote.get_quotes(symbols) if watchlist else {}
     for item in watchlist:
-        fields = quotes.get(_watch_symbol(item))
+        symbol = _watch_symbol(item)
+        fields = quotes.get(symbol)
         if not fields:
             continue
         info = _fields_info(fields)
+        if not all(math.isfinite(info[key]) and info[key] > 0 for key in ("price", "prev_close")):
+            continue
         checks = [
-            ("watch_target", item.get("target_price"), info["price"] >= (item.get("target_price") or float("inf")), "达到目标价"),
-            ("watch_stop", item.get("stop_loss"), info["price"] <= (item.get("stop_loss") or 0), "跌破观察止损价"),
-            ("watch_up", item.get("alert_up_pct"), info["change_pct"] >= (item.get("alert_up_pct") or float("inf")), "涨幅达到预警值"),
-            ("watch_down", item.get("alert_down_pct"), info["change_pct"] <= -(item.get("alert_down_pct") or float("inf")), "跌幅达到预警值"),
+            ("watch_target", "target_price", info["price"], "达到目标价"),
+            ("watch_stop", "stop_loss", -info["price"], "跌破观察止损价"),
+            ("watch_up", "alert_up_pct", info["change_pct"], "涨幅达到预警值"),
+            ("watch_down", "alert_down_pct", -info["change_pct"], "跌幅达到预警值"),
         ]
-        for kind, threshold, triggered, title in checks:
-            if threshold is not None and triggered:
-                alerts.append({
-                    "id": _alert_id("watch", item["code"], kind), "source": "watch", "level": "warning",
-                    "code": item["code"], "title": f"{item.get('name', item['code'])}：{title}",
-                    "message": f"现价 {info['price']}，今日涨跌 {info['change_pct']:+.2f}%",
-                    "action": item.get("reason") or "请结合投资逻辑复核", "triggered_at": datetime.now().isoformat(timespec="seconds"),
-                })
+        for kind, key, value, title in checks:
+            try:
+                threshold = _optional_float(item.get(key))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if threshold is None or not math.isfinite(value):
+                continue
+            if kind == "watch_target":
+                if not _quote.target_reached(value, threshold, item.get("target_direction")):
+                    continue
+            elif value < (-threshold if kind == "watch_stop" else threshold):
+                continue
+            alerts.append({
+                "id": _alert_id("watch", symbol, kind), "source": "watch", "level": "warning",
+                "code": item["code"], "title": f"{item.get('name', item['code'])}：{title}",
+                "message": f"现价 {info['price']}，今日涨跌 {info['change_pct']:+.2f}%",
+                "action": item.get("reason") or "请结合投资逻辑复核",
+                "triggered_at": datetime.now().isoformat(timespec="seconds"),
+            })
     today = datetime.now().date()
     for event in _load_json_file(EVENTS_FILE, []):
         try:
@@ -1720,12 +1795,22 @@ def _collect_alerts():
 @app.route("/api/alerts", methods=["GET"])
 def api_alerts():
     try:
-        states = _load_json_file(ALERT_STATES_FILE, {})
+        alerts = _collect_alerts()
         items = []
-        for alert in _collect_alerts():
-            alert["status"] = states.get(alert["id"], {}).get("status", "active")
-            if alert["status"] != "dismissed":
-                items.append(alert)
+        with _DATA_WRITE_LOCK:
+            states = _load_json_file(ALERT_STATES_FILE, {})
+            changed = False
+            for alert in alerts:
+                state = states.setdefault(alert["id"], {})
+                if "triggered_at" not in state:
+                    state["triggered_at"] = alert["triggered_at"]
+                    changed = True
+                alert["triggered_at"] = state["triggered_at"]
+                alert["status"] = state.get("status", "active")
+                if alert["status"] != "dismissed":
+                    items.append(alert)
+            if changed:
+                _save_json_file(ALERT_STATES_FILE, states)
         priority = {"critical": 0, "warning": 1, "info": 2}
         items.sort(key=lambda x: priority.get(x["level"], 3))
         return jsonify({"alerts": items, "unread_count": sum(1 for x in items if x["status"] == "active"),
@@ -1741,8 +1826,8 @@ def api_alert_action():
     if not alert_id or action not in ("ack", "dismiss"):
         return jsonify({"error": "invalid alert action"}), 400
     states = _load_json_file(ALERT_STATES_FILE, {})
-    states[alert_id] = {"status": "acknowledged" if action == "ack" else "dismissed",
-                        "updated_at": datetime.now().isoformat(timespec="seconds")}
+    states.setdefault(alert_id, {}).update({"status": "acknowledged" if action == "ack" else "dismissed",
+                        "updated_at": datetime.now().isoformat(timespec="seconds")})
     _save_json_file(ALERT_STATES_FILE, states)
     return jsonify({"success": True})
 
@@ -1863,13 +1948,11 @@ def _calculate_trade_state(trades, existing_portfolio=None):
             raise ValueError(f"第 {index + 1} 条交易方向无效")
         try:
             price = float(trade.get("price"))
-            shares_number = float(trade.get("shares"))
+            shares = _positive_shares(trade.get("shares"))
         except (TypeError, ValueError, OverflowError):
-            raise ValueError(f"第 {index + 1} 条交易价格和数量必须是数字")
-        if (not math.isfinite(price) or not math.isfinite(shares_number) or
-                price <= 0 or shares_number <= 0 or not shares_number.is_integer()):
+            raise ValueError(f"第 {index + 1} 条交易价格必须是数字，数量必须为正整数")
+        if not math.isfinite(price) or price <= 0:
             raise ValueError(f"第 {index + 1} 条交易价格必须为有限正数，数量必须为正整数")
-        shares = int(shares_number)
         trade_id = str(trade.get("id") or "").strip()
         if trade_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", trade_id):
             raise ValueError(f"第 {index + 1} 条交易 ID 无效")
@@ -1931,13 +2014,23 @@ def _commit_trade_state(trades, metadata=None):
     with _DATA_WRITE_LOCK:
         current_trades = _load_trades()
         current_portfolio = _load_portfolio_data()
-        _, expected_portfolio = _calculate_trade_state(current_trades, current_portfolio)
+        # 只迁移从未出现在账本中的旧持仓；已有交易的差异仍需人工对账。
+        ledger_codes = {str(trade.get("code") or "").strip() for trade in current_trades}
+        opening_trades = []
+        for item in current_portfolio:
+            if item["code"] not in ledger_codes:
+                opening_trades.append({
+                    "id": uuid.uuid4().hex, "date": item.get("first_buy_date") or "1970-01-01",
+                    "code": item["code"], "name": item.get("name"), "action": "buy",
+                    "price": item["cost"], "shares": item["shares"], "opening_balance": True,
+                })
+        _, expected_portfolio = _calculate_trade_state(opening_trades + current_trades, current_portfolio)
         if _portfolio_signature(expected_portfolio) != _portfolio_signature(current_portfolio):
             raise LedgerConflictError(
                 "当前持仓与交易账本不一致，已停止自动重建；请先核对或补录期初/调整交易"
             )
 
-        normalized, portfolio = _calculate_trade_state(trades, metadata or current_portfolio)
+        normalized, portfolio = _calculate_trade_state(opening_trades + trades, metadata or current_portfolio)
         try:
             _save_trades(normalized)
             _save_json_file(PORTFOLIO_FILE, portfolio)
@@ -1975,13 +2068,11 @@ def api_trades_add():
         return jsonify({"error": "action 必须是 buy 或 sell"}), 400
     try:
         price = float(data.get("price"))
-        shares_number = float(data.get("shares"))
+        shares = _positive_shares(data.get("shares"))
     except (TypeError, ValueError, OverflowError):
-        return jsonify({"error": "price、shares 必须是数字"}), 400
-    if (not math.isfinite(price) or not math.isfinite(shares_number) or
-            price <= 0 or shares_number <= 0 or not shares_number.is_integer()):
+        return jsonify({"error": "价格必须是数字，数量必须为正整数"}), 400
+    if not math.isfinite(price) or price <= 0:
         return jsonify({"error": "price 必须为有限正数，shares 必须为正整数"}), 400
-    shares = int(shares_number)
 
     name = str(data.get("name") or "").strip()
     if not name:
@@ -2145,38 +2236,92 @@ def api_chat_history_clear():
     return jsonify({"success": True})
 
 
-@app.route("/api/ai-balance", methods=["GET"])
-def api_ai_balance():
-    """Query DeepSeek API balance"""
+def _local_settings_request():
+    # Check both the peer and the Host header so arbitrary DNS names cannot reach local settings.
+    host = request.host.partition("]")[0][1:] if request.host.startswith("[") else request.host.split(":")[0]
     try:
-        s = requests.Session()
-        s.trust_env = False
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        resp = s.get(
+        return host.lower() in {"localhost", "127.0.0.1", "::1"} and ip_address(request.remote_addr).is_loopback
+    except ValueError:
+        return False
+
+
+def _deepseek_balance(api_key):
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.get(
             "https://api.deepseek.com/user/balance",
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=10
+            timeout=10,
+            allow_redirects=False,
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("balance_infos"):
-                info = data["balance_infos"][0]
-                return jsonify({
-                    "balance": info.get("total_balance", "0"),
-                    "topped_up": info.get("topped_up_balance", "0"),
-                    "granted": info.get("granted_balance", "0"),
-                    "currency": info.get("currency", "CNY"),
-                })
-            # Alternative response format
-            return jsonify({
-                "balance": data.get("total_balance", data.get("balance", "0")),
-                "topped_up": data.get("topped_up_balance", "0"),
-                "granted": data.get("granted_balance", "0"),
-                "currency": data.get("currency", "CNY"),
-            })
-        return jsonify({"error": f"API returned {resp.status_code}"}), 500
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        response.raise_for_status()
+        if response.status_code != 200:
+            raise requests.RequestException("Unexpected balance response")
+        data = response.json()
+    info = (data.get("balance_infos") or [data])[0]
+    return {
+        "balance": info.get("total_balance", info.get("balance", "0")),
+        "topped_up": info.get("topped_up_balance", "0"),
+        "granted": info.get("granted_balance", "0"),
+        "currency": info.get("currency", "CNY"),
+        "is_available": data.get("is_available"),
+    }
+
+
+def _deepseek_error(error):
+    if getattr(error.response, "status_code", None) in (401, 403):
+        return jsonify({"error": "DeepSeek 拒绝了此 API Key，请检查密钥。"}), 422
+    return jsonify({"error": "暂时无法连接 DeepSeek，请检查网络后重试。"}), 502
+
+
+@app.route("/api/settings/deepseek", methods=["GET", "POST"])
+def api_deepseek_settings():
+    global _agent_executor
+    if not _local_settings_request():
+        return jsonify({"error": "请在本机打开看板配置 DeepSeek。"}), 403
+
+    if request.method == "GET":
+        key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        return jsonify({"configured": bool(key and key != "your_api_key_here")})
+
+    data = request.get_json(silent=True)
+    key = data.get("api_key") if isinstance(data, dict) else None
+    if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,256}", key.strip()):
+        return jsonify({"error": "请输入有效的 DeepSeek API Key。"}), 400
+    key = key.strip()
+    try:
+        balance = _deepseek_balance(key)
+    except requests.RequestException as error:
+        return _deepseek_error(error)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return jsonify({"error": "DeepSeek 返回了无法识别的验证结果。"}), 502
+
+    try:
+        env_file = _ENV_FILE.resolve()
+        if os.name == "posix" and env_file.exists():
+            env_file.chmod(0o600)
+        saved, _, _ = set_key(env_file, "DEEPSEEK_API_KEY", key)
+        if not saved:
+            raise OSError("DeepSeek key write failed")
+    except (OSError, ValueError):
+        return jsonify({"error": "验证通过，但无法写入项目的 .env 文件。"}), 500
+
+    os.environ["DEEPSEEK_API_KEY"] = key
+    _agent_executor = None
+    return jsonify({"configured": True, **balance})
+
+
+@app.route("/api/ai-balance", methods=["GET"])
+def api_ai_balance():
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        return jsonify({"error": "请先配置 DeepSeek API Key。"}), 400
+    try:
+        return jsonify(_deepseek_balance(api_key))
+    except requests.RequestException as error:
+        return _deepseek_error(error)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return jsonify({"error": "DeepSeek 返回了无法识别的余额数据。"}), 502
 
 
 # ===== 新功能 API =====
@@ -2235,11 +2380,12 @@ def api_profit_curve():
 def api_record_snapshot():
     """手动触发记录今日快照"""
     try:
-        from tools.portfolio_tracker import record_daily_snapshot
         snapshot = record_daily_snapshot()
         if not snapshot:
             return jsonify({"error": "无持仓数据"}), 400
         return jsonify({"success": True, "snapshot": snapshot})
+    except SnapshotQuoteError as e:
+        return jsonify({"error": str(e)}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2399,73 +2545,54 @@ def api_add_position_calc():
         return jsonify({"error": str(e)}), 500
 
 
+def _signal_changes(signals, previous):
+    current = {}
+    changes = []
+    for signal in signals:
+        key = (signal["market"], signal["code"])
+        prior = previous.get(key)
+        if signal["action"] in ("quote_missing", "data_error", "data_insufficient"):
+            if prior:
+                current[key] = prior
+            continue
+        if signal["level"] in ("critical", "warning", "opportunity"):
+            state = (signal["action"], signal["level"])
+            current[key] = state
+            if prior != state:
+                changes.append(f'{signal["name"]}（{signal["code"]}） {signal["signal"]}')
+        elif prior:
+            changes.append(f'{signal["name"]}（{signal["code"]}） 提醒解除')
+    return current, changes
+
+
 def start_signal_monitor():
     """Background thread that checks signals every 30 minutes during trading hours"""
     import threading
     import time
 
-    def _extract_direction(signal_text):
-        """提取操作方向，忽略具体数字变化"""
-        if "重仓加仓" in signal_text:
-            return "add_heavy"
-        elif "适合加仓" in signal_text:
-            return "add"
-        elif "小幅加仓" in signal_text:
-            return "add_light"
-        elif "止盈" in signal_text:
-            return "take_profit"
-        elif "减仓" in signal_text:
-            return "sell"
-        else:
-            return "hold"
-
     def monitor_loop():
         last_directions = {}  # {code: direction} for all stocks
+        last_slot = None
         while True:
             try:
-                now = datetime.now()
-                # Only check during trading hours (9:30-15:00, weekdays)
-                if now.weekday() < 5 and 9 <= now.hour <= 14:
+                now = datetime.now(MARKET_TZ)
+                slot = now.replace(second=0, microsecond=0)
+                if slot.time() in RISK_CHECK_TIMES and slot != last_slot and is_trading_day(slot.date()):
+                    last_slot = slot
                     from agents import RiskMonitor
                     monitor = RiskMonitor()
                     signals = monitor.get_signals()
 
-                    # Calculate current directions for all stocks
-                    current_directions = {}
-                    has_actionable = False
-                    for sig in signals:
-                        signal_text = sig["signal"]
-                        direction = _extract_direction(signal_text)
-                        current_directions[sig["code"]] = direction
-                        if any(kw in signal_text for kw in ["加仓", "止盈", "减仓"]):
-                            has_actionable = True
-
-                    # Check if any stock's direction changed
-                    has_change = False
-                    for code, direction in current_directions.items():
-                        if last_directions.get(code) != direction:
-                            has_change = True
-                            break
-
-                    # If any direction changed and at least one has action, send ALL stocks
-                    if has_change and has_actionable:
-                        last_directions.update(current_directions)
-                        message = f"📊 操作信号更新 ({now.strftime('%H:%M')})\n\n"
-                        for sig in signals:
-                            held = "[持仓]" if sig["code"] in monitor.portfolio else "[观察]"
-                            message += f"▸ {sig['name']}({sig['code']}) {held}\n"
-                            message += f"  {sig['signal']}\n\n"
+                    last_directions, changes = _signal_changes(signals, last_directions)
+                    if changes:
+                        message = f"操作信号更新 ({now.strftime('%H:%M')})\n" + "\n".join(changes)
                         _send_notification("DataBoard 操作信号", message)
-                    elif not has_change:
-                        pass  # No change, no notification
-                    else:
-                        last_directions.update(current_directions)
 
             except Exception as e:
                 pass
 
-            # Check every 30 minutes
-            time.sleep(30 * 60)
+            # Align with the same market slots as the CLI scheduler.
+            time.sleep(60 - time.time() % 60)
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
@@ -2499,8 +2626,10 @@ def _send_notification(title, content):
 
 
 if __name__ == "__main__":
+    from web import DEFAULT_PORT
+
     start_signal_monitor()
     # 安全：默认绑定本机、关闭 debug（Werkzeug 调试器可致远程代码执行）
     _host = os.getenv("DASHBOARD_HOST", "127.0.0.1")
     _debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host=_host, port=5000, debug=_debug)
+    app.run(host=_host, port=DEFAULT_PORT, debug=_debug)

@@ -5,6 +5,7 @@
 - 周/月/年维度统计
 """
 import json
+import math
 import os
 import re
 import requests
@@ -12,6 +13,7 @@ from datetime import datetime, date, timedelta
 from langchain_core.tools import tool
 
 from tools import quote as _q
+from tools.trading_calendar import MARKET_TZ
 
 TRACKER_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "portfolio_history.json")
 
@@ -92,6 +94,10 @@ def _get_prices(codes: list) -> dict:
     return prices
 
 
+class SnapshotQuoteError(ValueError):
+    """至少一笔持仓缺少可用行情。"""
+
+
 def record_daily_snapshot():
     """Record today's portfolio snapshot (call once per day)"""
     portfolio = _load_portfolio()
@@ -101,7 +107,11 @@ def record_daily_snapshot():
     codes = [item["code"] for item in portfolio]
     prices = _get_prices(codes)
 
-    today = date.today().isoformat()
+    missing = [code for code in codes if not math.isfinite(prices.get(code, 0)) or prices.get(code, 0) <= 0]
+    if missing:
+        raise SnapshotQuoteError(f"行情缺失，未记录快照：{'、'.join(missing)}")
+
+    today = datetime.now(MARKET_TZ).date().isoformat()
     total_cost = 0
     total_value = 0
     positions = []
@@ -109,8 +119,6 @@ def record_daily_snapshot():
     for item in portfolio:
         code = item["code"]
         current_price = prices.get(code, 0)
-        if current_price == 0:
-            continue
         cost_value = item["cost"] * item["shares"]
         market_value = current_price * item["shares"]
         total_cost += cost_value

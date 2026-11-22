@@ -6,10 +6,11 @@ Close window = exit program cleanly.
 import os
 import sys
 import threading
-import time
+import traceback
 
-sys.path.insert(0, os.path.dirname(__file__))
-os.chdir(os.path.dirname(__file__))
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PROJECT_DIR)
+os.chdir(PROJECT_DIR)
 
 # Fix proxy
 for key in list(os.environ.keys()):
@@ -20,9 +21,20 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def start_flask():
-    """Run Flask in background thread"""
-    from web.app import app, start_signal_monitor
+def start_flask(window):
+    """Start the local server and load the dashboard once its socket is bound."""
+    host = "127.0.0.1"
+    try:
+        from werkzeug.serving import make_server
+        from web import DEFAULT_PORT
+        from web.app import app, start_signal_monitor
+
+        server = make_server(host, DEFAULT_PORT, app, threaded=True)
+    except (Exception, SystemExit):
+        traceback.print_exc()
+        window.load_html("<h2>DataBoard could not start</h2><p>See the terminal for details.</p>")
+        return
+
     start_signal_monitor()
 
     # Preload heavy modules in background after Flask is serving
@@ -40,15 +52,20 @@ def start_flask():
 
     threading.Thread(target=_preload, daemon=True).start()
 
-    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    window.load_url(f"http://{host}:{server.server_port}/")
 
 
 if __name__ == "__main__":
     import webview
 
-    # Start Flask server in background
-    server_thread = threading.Thread(target=start_flask, daemon=True)
-    server_thread.start()
+    if sys.platform == "darwin":
+        from AppKit import NSApplication, NSImage
+
+        icon_path = os.path.join(PROJECT_DIR, "web", "static", "databoard.png")
+        icon = NSImage.alloc().initWithContentsOfFile_(icon_path)
+        if icon is not None:
+            NSApplication.sharedApplication().setApplicationIconImage_(icon)
 
     # Open window immediately with loading page, then redirect when ready
     window = webview.create_window(
@@ -68,15 +85,5 @@ if __name__ == "__main__":
         text_select=True,
     )
 
-    def wait_and_load():
-        """Wait for Flask to be ready, then navigate"""
-        import urllib.request
-        for _ in range(30):  # max 15 seconds
-            try:
-                urllib.request.urlopen("http://127.0.0.1:5000/")
-                break
-            except:
-                time.sleep(0.5)
-        window.load_url("http://127.0.0.1:5000")
-
-    webview.start(wait_and_load)
+    threading.Thread(target=start_flask, args=(window,), daemon=True).start()
+    webview.start()

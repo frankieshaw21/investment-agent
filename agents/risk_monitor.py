@@ -1,6 +1,7 @@
 """
 风控监控 Agent - 监控持仓股票异动，触发预警
 """
+import math
 import os
 from datetime import datetime
 from statistics import pstdev
@@ -14,6 +15,7 @@ class RiskMonitor:
     def __init__(self):
         self.portfolio = {}
         self.watchlist = {}
+        self.signal_watchlist = []
         self._load_portfolio()
         self._load_watchlist()
 
@@ -37,6 +39,7 @@ class RiskMonitor:
                 for item in items:
                     self.portfolio[item["code"]] = {
                         "name": item["name"],
+                        "market": item.get("market", ""),
                         "cost": item["cost"],
                         "shares": item["shares"],
                         "stop_loss": item.get("stop_loss", item["cost"] * 0.9),
@@ -53,6 +56,7 @@ class RiskMonitor:
         if os.path.exists(watchlist_file):
             with open(watchlist_file, "r", encoding="utf-8") as f:
                 items = json.load(f)
+                self.signal_watchlist = items
                 for item in items:
                     code = item["code"]
                     # 如果在持仓里，用持仓数据；否则构造一个观察用的条目
@@ -189,6 +193,7 @@ class RiskMonitor:
                     "level": level,
                     "reasons": reasons,
                     "metrics": metrics,
+                    "title": title,
                     "signal": f"{icons.get(level, '⚪')} {title}：{reason_text}",
                 }
 
@@ -223,9 +228,11 @@ class RiskMonitor:
                         f"现价{current_price:.3f}已低于观察止损价{observe_stop:.3f}",
                         "等待价格重新企稳",
                     ])
-                if observe_target and current_price >= observe_target:
-                    return response("avoid_chase", "warning", "暂不追高", [
-                        f"现价{current_price:.3f}已达到观察目标价{observe_target:.3f}",
+                direction = watch_config.get("target_direction", "up")
+                if observe_target and _quote.target_reached(current_price, observe_target, direction):
+                    title = "跌至观察目标价" if direction == "down" else "涨至观察目标价"
+                    return response("watch_target", "warning", title, [
+                        f"现价{current_price:.3f}，目标价{observe_target:.3f}",
                     ])
 
             if not closes or len(closes) < 60:
@@ -428,90 +435,58 @@ class RiskMonitor:
             return None
 
     def get_signals(self) -> list:
-        """Get trading signals for all watchlist stocks (including those not yet held)"""
-        import json
+        """按市场和代码合并持仓与自选，每只证券都返回检查结果。"""
+        from concurrent.futures import ThreadPoolExecutor
 
-        # Load watchlist
-        watchlist_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
-        watchlist = []
-        if os.path.exists(watchlist_file):
-            with open(watchlist_file, "r", encoding="utf-8") as f:
-                watchlist = json.load(f)
-
-        if not watchlist:
-            return []
-
-        # Fetch current prices using the persisted market when present.
-        def _item_symbol(item):
-            market = str(item.get("market", "")).lower()
+        def symbol_for(item):
+            market = str(item.get("market") or "").lower()
             if market in ("sh", "sz", "bj", "hk"):
                 return market + item["code"]
             return _quote.code_prefix(item["code"])
 
-        symbols_by_code = {item["code"]: _item_symbol(item) for item in watchlist}
-        quotes = _quote.get_quotes(list(symbols_by_code.values()))
-        if not quotes:
+        items = {symbol_for(item): item for item in self.signal_watchlist}
+        positions = {}
+        for code, position in self.portfolio.items():
+            item = dict(position, code=code)
+            symbol = symbol_for(item)
+            positions[symbol] = position
+            items.setdefault(symbol, item)
+        if not items:
             return []
 
+        quotes = _quote.get_quotes(list(items))
         prices = {}
-        for code, symbol in symbols_by_code.items():
-            fields = quotes.get(symbol)
-            if not fields or len(fields) <= _quote.F_PRICE:
-                continue
+        for symbol, fields in quotes.items():
             try:
-                prices[code] = float(fields[_quote.F_PRICE]) if fields[_quote.F_PRICE] else 0
-            except (TypeError, ValueError):
+                price = float(fields[_quote.F_PRICE])
+                if math.isfinite(price) and price > 0:
+                    prices[symbol] = price
+            except (TypeError, ValueError, IndexError):
                 continue
 
-        signals = []
-        # Pre-fetch market context once (instead of per-stock).
-        market_status = self._get_market_status()
-        market_closes = _quote.get_closes("sh000001", 120)
-        market_return_20 = None
+        market_status = self._get_market_status() if prices else None
+        market_closes = _quote.get_closes("sh000001", 120) if prices else None
+        market_return = None
         if market_closes and len(market_closes) >= 21 and market_closes[-21]:
-            market_return_20 = (market_closes[-1] / market_closes[-21] - 1) * 100
+            market_return = (market_closes[-1] / market_closes[-21] - 1) * 100
 
-        # Pre-fetch K-line data for all watchlist stocks using thread pool
-        from concurrent.futures import ThreadPoolExecutor
-        klines_cache = {}
-        stock_codes = [item["code"] for item in watchlist if prices.get(item["code"], 0) > 0]
-
-        def _fetch_one(code):
-            return code, self._fetch_klines(symbols_by_code[code])
+        def evaluate(entry):
+            symbol, item = entry
+            held = symbol in positions
+            row = {"code": item["code"], "market": symbol[:2], "name": item.get("name") or item["code"]}
+            if symbol not in prices:
+                return dict(row, position_state="held" if held else "watch", action="quote_missing",
+                            level="info", title="行情暂缺", signal="行情暂缺，本次无法判断",
+                            reasons=["本次无法取得有效现价"], metrics={})
+            result = self._get_signal(
+                prices[symbol], position=positions.get(symbol), code=symbol, is_held=held,
+                watch_config=item, klines=self._fetch_klines(symbol) or [],
+                market_status=market_status, market_return_20=market_return,
+            )
+            return {**row, **result}
 
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(_fetch_one, code) for code in stock_codes]
-            for future in futures:
-                code, kline = future.result()
-                if kline:
-                    klines_cache[code] = kline
-
-        for item in watchlist:
-            code = item["code"]
-            name = item["name"]
-            current_price = prices.get(code, 0)
-            if current_price == 0:
-                continue
-
-            is_held = code in self.portfolio
-            pos = self.portfolio.get(code)
-            signal_result = self._get_signal(
-                current_price,
-                position=pos,
-                info={},
-                klines=klines_cache.get(code),
-                market_status=market_status,
-                market_return_20=market_return_20,
-                code=symbols_by_code.get(code, code),
-                is_held=is_held,
-                watch_config=item,
-            )
-            signals.append({
-                "code": code,
-                "market": item.get("market") or symbols_by_code.get(code, "")[:2],
-                "name": name,
-                **signal_result,
-            })
+            signals = list(executor.map(evaluate, items.items()))
 
         level_priority = {"critical": 0, "warning": 1, "opportunity": 2, "neutral": 3, "info": 4}
         signals.sort(key=lambda row: (
@@ -622,51 +597,84 @@ class RiskMonitor:
 
         return alerts
 
-    def get_portfolio_summary(self) -> str:
-        """获取持仓概览；只计算页面实际展示字段，行情统一复用 TTL 缓存。"""
-        if not self.portfolio:
+    def get_portfolio_data(self):
+        """返回持仓、当日表现和汇总；缺行情时保留持仓行。"""
+        symbols = {
+            code: _quote.code_prefix(f"{pos.get('market') or ''}{code}")
+            for code, pos in self.portfolio.items()
+        }
+        quotes = _quote.get_quotes(list(symbols.values())) if symbols else {}
+
+        def number(fields, index):
+            try:
+                value = float(fields[index])
+                return value if math.isfinite(value) else None
+            except (IndexError, TypeError, ValueError):
+                return None
+
+        rows = []
+        total_cost = total_value = 0
+        for code, pos in self.portfolio.items():
+            fields = quotes.get(symbols[code]) or []
+            price = number(fields, _quote.F_PRICE)
+            if price is not None and price <= 0:
+                price = None
+            prev_close = number(fields, _quote.F_PREV_CLOSE)
+            shares = pos["shares"]
+            cost = pos["cost"]
+            cost_value = cost * shares
+            market_value = price * shares if price is not None else None
+            total_cost += cost_value
+            if market_value is not None:
+                total_value += market_value
+            rows.append({
+                "code": code, "name": pos["name"], "cost": cost, "shares": shares, "price": price,
+                "change_pct": number(fields, _quote.F_CHANGE_PCT) if price is not None else None,
+                "today_profit": (price - prev_close) * shares if price is not None and prev_close and prev_close > 0 else None,
+                "market_value": market_value,
+                "profit": market_value - cost_value if market_value is not None else None,
+                "profit_pct": (price / cost - 1) * 100 if price is not None and cost > 0 else None,
+            })
+        complete = all(row["price"] is not None for row in rows)
+        today_complete = all(row["today_profit"] is not None for row in rows)
+        for row in rows:
+            row["weight_pct"] = row["market_value"] / total_value * 100 if complete and total_value > 0 else None
+        return {
+            "positions": rows,
+            "totals": {
+                "cost": total_cost,
+                "today_profit": sum(row["today_profit"] for row in rows) if today_complete else None,
+                "value": total_value if complete else None,
+                "profit": total_value - total_cost if complete else None,
+                "profit_pct": (total_value / total_cost - 1) * 100 if complete and total_cost > 0 else None,
+            },
+        }
+
+    def get_portfolio_summary(self, data=None) -> str:
+        """格式化持仓概览，供命令行和兼容接口使用。"""
+        data = self.get_portfolio_data() if data is None else data
+        if not data["positions"]:
             return "未配置持仓。请编辑 portfolio.json 添加持仓。"
 
-        quotes = _quote.get_quotes(list(self.portfolio.keys()))
-        if not quotes:
-            return "获取行情失败，请稍后重试"
+        def fmt(value, format_spec, suffix=""):
+            return format(value, format_spec) + suffix if value is not None else "—"
 
-        result = "=== 持仓概览 ===\n\n"
-        total_cost = 0
-        total_value = 0
-
-        for code, pos in self.portfolio.items():
-            fields = quotes.get(_quote.code_prefix(code))
-            if not fields or len(fields) <= _quote.F_CHANGE_PCT:
-                continue
-            try:
-                current_price = float(fields[_quote.F_PRICE]) if fields[_quote.F_PRICE] else 0
-                change_pct = float(fields[_quote.F_CHANGE_PCT]) if fields[_quote.F_CHANGE_PCT] else 0
-            except (TypeError, ValueError):
-                continue
-            if current_price <= 0:
-                continue
-
-            cost_value = pos["cost"] * pos["shares"]
-            market_value = current_price * pos["shares"]
-            profit = market_value - cost_value
-            profit_pct = (current_price / pos["cost"] - 1) * 100
-            total_cost += cost_value
-            total_value += market_value
-
-            emoji = "+" if profit >= 0 else "-"
-            today_profit = change_pct / 100 * current_price * pos["shares"]
-            result += (
-                f"[{emoji}] {pos['name']}({code})\n"
-                f"   现价: {current_price} | 成本: {pos['cost']} | 份额: {pos['shares']}\n"
-                f"   今日涨跌: {change_pct:+.2f}% | 今日盈亏: {today_profit:+.2f}元\n"
-                f"   盈亏: {profit:+.2f}元 ({profit_pct:+.2f}%)\n\n"
-            )
-
-        total_profit = total_value - total_cost
-        total_pct = (total_value / total_cost - 1) * 100 if total_cost > 0 else 0
-        result += f"{'='*30}\n"
-        result += f"总投入: {total_cost:.2f}元\n"
-        result += f"总市值: {total_value:.2f}元\n"
-        result += f"总盈亏: {total_profit:+.2f}元 ({total_pct:+.2f}%)\n"
-        return result
+        lines = ["=== 持仓概览 ===", ""]
+        for row in data["positions"]:
+            profit = row["profit"]
+            sign = "+" if profit is None or profit >= 0 else "-"
+            lines.extend([
+                f"[{sign}] {row['name']}({row['code']})",
+                f"   现价: {fmt(row['price'], 'g')} | 成本: {row['cost']} | 份额: {row['shares']}",
+                f"   今日涨跌: {fmt(row['change_pct'], '+.2f', '%')} | 今日盈亏: {fmt(row['today_profit'], '+.2f', '元')}",
+                f"   盈亏: {fmt(profit, '+.2f', '元')} ({fmt(row['profit_pct'], '+.2f', '%')})",
+                "",
+            ])
+        totals = data["totals"]
+        lines.extend([
+            "=" * 30,
+            f"总投入: {totals['cost']:.2f}元",
+            f"总市值: {fmt(totals['value'], '.2f', '元')}",
+            f"总盈亏: {fmt(totals['profit'], '+.2f', '元')} ({fmt(totals['profit_pct'], '+.2f', '%')})",
+        ])
+        return "\n".join(lines) + "\n"

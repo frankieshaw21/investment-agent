@@ -22,6 +22,19 @@
 
 ### 1. 安装依赖
 
+**macOS**
+
+先在终端运行 `python3.12 --version`。如果提示 `command not found`，请先安装 Python 3.12，或把已有的 Python 3.12 加入 `PATH`，也可以用其绝对路径创建虚拟环境。[Python 在 macOS 上的安装说明](https://docs.python.org/zh-cn/3.12/using/mac.html)
+
+```bash
+cd investment-agent
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+**Windows**
+
 ```bash
 cd investment-agent
 pip install -r requirements.txt
@@ -29,9 +42,19 @@ pip install -r requirements.txt
 
 ### 2. 配置 API Key
 
+从本机打开看板，在右上角点击 **DeepSeek 接入**，填入从 DeepSeek 平台创建的 API Key，再点击 **验证并保存**。成功后密钥会写入项目的 `.env`，当前看板即可用于 AI 判级。
+
+也可以在启动前手动配置。
+
 复制示例配置后填写自己的密钥（`.env` 已被 Git 忽略）：
 
 ```bash
+# macOS
+cp .env.example .env
+```
+
+```bat
+:: Windows（命令提示符）
 copy .env.example .env
 ```
 
@@ -43,8 +66,12 @@ DeepSeek 注册地址: https://platform.deepseek.com/
 
 ### 3. 运行
 
+**桌面版**：macOS 在 Finder 双击 `start.command`，也可以在终端运行 `./start.command`。如果脚本缺少执行权限，先运行 `chmod +x start.command`。关闭桌面窗口即可退出。Windows 双击 `start.vbs`，也可以运行 `start.bat`。
+
+**Web 版和命令行**：macOS 在新终端先运行 `source .venv/bin/activate`。
+
 ```bash
-# Web 界面（推荐，可视化操作）
+# Web 界面
 python main.py --web
 
 # 交互模式（命令行对话）
@@ -59,6 +86,8 @@ python main.py --monitor
 # 启动定时任务（后台运行）
 python main.py --schedule
 ```
+
+Web 版默认地址为 macOS 的 `http://127.0.0.1:5001`、Windows 的 `http://127.0.0.1:5000`。如果端口已被占用，可以运行 `python main.py --web --port 8000`，再打开 `http://127.0.0.1:8000`。macOS 的 AirPlay 接收器可能会占用 5000 端口。[Flask 端口说明](https://flask.palletsprojects.com/en/stable/server/#address-already-in-use)
 
 ## 使用示例
 
@@ -90,6 +119,14 @@ python main.py --schedule
 真实持仓、自选、交易和聊天数据不会提交到 Git。首次使用时复制示例文件：
 
 ```bash
+# macOS
+cp portfolio.example.json portfolio.json
+cp watchlist.example.json watchlist.json
+cp trades.example.json trades.json
+```
+
+```bat
+:: Windows（命令提示符）
 copy portfolio.example.json portfolio.json
 copy watchlist.example.json watchlist.json
 copy trades.example.json trades.json
@@ -172,14 +209,14 @@ investment-agent/
 
 ## 定时任务
 
-启动 `python main.py --schedule` 后自动执行：
+运行 `python main.py --schedule` 后，按北京时间和 A 股交易日历执行。交易日历不可用时跳过自动任务。
 
 | 时间 | 任务 |
 |------|------|
-| 每日 9:20 | 盘前市场概览 |
-| 交易日 每30分钟 | 风险检查 |
-| 每日 15:10 | 记录持仓快照（收益曲线数据源）|
-| 每日 17:00 | 生成每日投资简报 |
+| 交易日 9:20 | 盘前市场概览 |
+| 交易日 09:30–11:30、13:00–15:00，每 30 分钟 | 风险检查 |
+| 交易日 15:10 | 记录持仓快照（收益曲线数据源）|
+| 交易日 17:00 | 生成每日投资简报 |
 
 ## 进阶扩展
 

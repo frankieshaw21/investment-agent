@@ -2,6 +2,7 @@
 RAG 知识库 - 存储和检索你的投资笔记、研报等
 """
 import os
+from uuid import uuid4
 import chromadb
 from chromadb.config import Settings
 
@@ -31,7 +32,7 @@ def add_document(content: str, metadata: dict = None, doc_id: str = None):
     """
     collection = get_collection()
     if doc_id is None:
-        doc_id = f"doc_{collection.count()}"
+        doc_id = f"doc_{uuid4().hex}"
     if metadata is None:
         metadata = {}
 
