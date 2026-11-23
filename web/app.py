@@ -6,6 +6,7 @@ import sys
 import re
 import math
 import threading
+import time
 import uuid
 from datetime import datetime
 from ipaddress import ip_address
@@ -143,6 +144,12 @@ def api_market_overview():
         # 指数行情和涨跌家数来自不同上游，并行获取以缩短首屏等待。
         from concurrent.futures import ThreadPoolExecutor
         index_codes = ["sh000001", "sz399001", "sz399006"]
+        part = request.args.get("part")
+        if part == "indices":
+            quotes = _tencent_request(index_codes)
+            return jsonify({"indices": [_parse_index(quotes[code]) for code in index_codes if code in quotes]})
+        if part == "breadth":
+            return jsonify({"stats": _quote.get_market_breadth()})
         with ThreadPoolExecutor(max_workers=2) as executor:
             quote_future = executor.submit(_tencent_request, index_codes)
             breadth_future = executor.submit(_quote.get_market_breadth)
@@ -649,6 +656,36 @@ def _analyze_news_sentiment(news_items):
         pass  # 余额不足或无 key，静默跳过
 
 
+_NEWS_POOL_LOCK = threading.Lock()
+_news_pool_expires = 0
+_news_pool_rows = []
+_news_pool_views = {}
+
+
+def _news_pool(finance_only=False):
+    global _news_pool_rows, _news_pool_expires
+    with _NEWS_POOL_LOCK:
+        if time.monotonic() >= _news_pool_expires:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def fetch(source):
+                with requests.Session() as session:
+                    session.trust_env = False
+                    return source(session)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                sina, eastmoney = executor.map(fetch, (_fetch_sina_news, _fetch_eastmoney_news))
+            _news_pool_rows = sina + eastmoney
+            _news_pool_views.clear()
+            _news_pool_expires = time.monotonic() + (120 if sina and eastmoney else 15)
+        if finance_only not in _news_pool_views:
+            rows = _news_pool_rows
+            if finance_only:
+                rows = [n for n in rows if _is_finance_news(n["title"], n["summary"])]
+            _news_pool_views[finance_only] = _dedup_news(rows)
+        return [dict(row) for row in _news_pool_views[finance_only]]
+
+
 @app.route("/api/daily-news", methods=["GET"])
 def api_daily_news():
     """每日财经新闻：多源聚合 + 持仓联动 + 摘要/分类 + AI 利好利空判断"""
@@ -661,17 +698,7 @@ def api_daily_news():
         recent_hours = int(request.args.get("hours", 48))
         cutoff = int(_time.time()) - recent_hours * 3600
 
-        s = requests.Session()
-        s.trust_env = False
-
-        # 1) 多源抓取
-        news_list = _fetch_sina_news(s) + _fetch_eastmoney_news(s)
-
-        # 2) 去财经噪音
-        news_list = [n for n in news_list if _is_finance_news(n["title"], n["summary"])]
-
-        # 3) 近似去重
-        news_list = _dedup_news(news_list)
+        news_list = _news_pool(finance_only=True)
 
         # 4) 时效过滤：保留最近 N 小时（无时间的保留）
         news_list = [n for n in news_list if (not n["ts"]) or n["ts"] >= cutoff]
@@ -794,23 +821,11 @@ def api_bank_sector():
 
         all_codes = sorted({code for sector in sectors_config for code in sector.get("stocks", [])})
 
-        def load_news_pool():
-            import time as time_mod
-            now = time_mod.time()
-            cached = getattr(api_bank_sector, "_news_cache", None)
-            if cached and now - cached[0] <= 120:
-                return cached[1]
-            with requests.Session() as session:
-                session.trust_env = False
-                pool = _dedup_news(_fetch_sina_news(session) + _fetch_eastmoney_news(session))
-            api_bank_sector._news_cache = (now, pool)
-            return pool
-
         # 行情和新闻来源互不依赖，并行获取；新闻池只抓一次供所有板块过滤。
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=2) as executor:
             quotes_future = executor.submit(_quote.get_quotes, all_codes)
-            news_future = executor.submit(load_news_pool)
+            news_future = executor.submit(_news_pool)
             quotes = quotes_future.result()
             news_pool = news_future.result()
 
@@ -914,19 +929,28 @@ def api_bank_sector():
         return jsonify({"error": str(e)}), 500
 
 
-def _realized_profit():
-    return sum(t.get("profit", 0) for t in _load_trades() if t.get("action") == "sell")
+def _realized_profit(trades=None):
+    if trades is None:
+        trades = _load_trades()
+    return sum(t.get("profit", 0) for t in trades if t.get("action") == "sell")
 
 
 @app.route("/api/portfolio", methods=["GET"])
 def api_portfolio():
     from agents import RiskMonitor
-    monitor = RiskMonitor()
-    data = monitor.get_portfolio_data()
+    with _DATA_WRITE_LOCK:
+        monitor = RiskMonitor()
+        trades = _load_trades()
+        holding_funds = _load_json_file(PORTFOLIO_SETTINGS_FILE, {}).get("holding_funds")
+    data = monitor.get_portfolio_data(trades)
     summary = monitor.get_portfolio_summary(data)
     totals = data["totals"]
-    realized = _realized_profit()
+    realized = _realized_profit(trades)
     totals["realized"] = realized
+    totals["holding_funds"] = holding_funds
+    totals["holding_ratio"] = (
+        totals["value"] / holding_funds if holding_funds and totals["value"] is not None else None
+    )
     totals["cumulative"] = realized + totals["profit"] if totals["profit"] is not None else None
     # 首页不展示本接口的 alerts；默认跳过昂贵的整份自选预警计算。
     alerts = monitor.check_all() if request.args.get("include_alerts") == "1" else []
@@ -981,11 +1005,7 @@ def api_signals():
 @app.route("/api/portfolio/list", methods=["GET"])
 def api_portfolio_list():
     """Get raw portfolio data for editing"""
-    import json as json_mod
-    portfolio_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
-    with open(portfolio_file, "r", encoding="utf-8") as f:
-        data = json_mod.load(f)
-    return jsonify({"portfolio": data})
+    return jsonify({"portfolio": _load_portfolio_data()})
 
 
 def _positive_shares(value):
@@ -1002,9 +1022,30 @@ def _positive_shares(value):
     return int(quantity)
 
 
+@app.route("/api/portfolio/holding-funds", methods=["POST"])
+def api_portfolio_holding_funds():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or "holding_funds" not in data:
+        return jsonify({"error": "请填写总仓位持有资金"}), 400
+    value = data["holding_funds"]
+    amount = None
+    if value is not None and value != "":
+        try:
+            if isinstance(value, bool):
+                raise ValueError
+            amount = float(value)
+            if not math.isfinite(amount) or amount < 0:
+                raise ValueError
+            amount = round(amount, 2)
+        except (TypeError, ValueError, OverflowError):
+            return jsonify({"error": "总仓位持有资金必须为非负金额"}), 400
+    _save_json_file(PORTFOLIO_SETTINGS_FILE, {"holding_funds": amount})
+    return jsonify({"success": True, "holding_funds": amount})
+
+
 @app.route("/api/portfolio/add", methods=["POST"])
 def api_portfolio_add():
-    """新增持仓等价于新增一笔买入交易，保持交易账本为唯一数量/成本来源。"""
+    """补录已有持仓，并在交易账本中标记为期初持仓。"""
     data = request.get_json(silent=True) or {}
     code = str(data.get("code") or "").strip()
     if not re.fullmatch(r"\d{6}", code):
@@ -1038,18 +1079,18 @@ def api_portfolio_add():
     name = name or code
     trade = {
         "id": uuid.uuid4().hex,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "date": datetime.now(MARKET_TZ).strftime("%Y-%m-%d %H:%M"),
         "code": code,
         "name": name,
         "action": "buy",
         "price": cost,
         "shares": shares,
         "amount": round(cost * shares, 2),
+        "opening_balance": True,
     }
     metadata = portfolio + [{
         "code": code, "name": name, "stop_loss": stop_loss,
         "take_profit": take_profit,
-        "first_buy_date": str(data.get("first_buy_date") or datetime.now().date().isoformat()),
     }]
     try:
         trades, rebuilt = _commit_trade_state(_load_trades() + [trade], metadata)
@@ -1063,7 +1104,7 @@ def api_portfolio_add():
 
 @app.route("/api/portfolio/update", methods=["POST"])
 def api_portfolio_update():
-    """更新止盈止损；账本管理的成本和数量必须通过交易记录调整。"""
+    """更新止盈止损；成本和数量由交易账本维护。"""
     data = request.get_json(silent=True) or {}
     code = str(data.get("code") or "").strip()
 
@@ -1125,6 +1166,7 @@ def api_portfolio_delete():
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 WATCHLIST_FILE = os.path.join(BASE_DIR, "watchlist.json")
 PORTFOLIO_FILE = os.path.join(BASE_DIR, "portfolio.json")
+PORTFOLIO_SETTINGS_FILE = os.path.join(BASE_DIR, "data", "portfolio_settings.json")
 EVENTS_FILE = os.path.join(BASE_DIR, "data", "events.json")
 ALERT_STATES_FILE = os.path.join(BASE_DIR, "data", "alert_states.json")
 
@@ -1610,17 +1652,19 @@ def api_stock_detail(symbol):
 
 
 def _portfolio_health_data():
+    from agents import RiskMonitor
+
     portfolio = _load_portfolio_data()
     if not portfolio:
         return {"score": 0, "level": "未配置", "positions": [], "alerts": [],
                 "dimensions": {}, "as_of": datetime.now().isoformat(timespec="seconds")}
-    quotes = _quote.get_quotes([x["code"] for x in portfolio])
+    positions = {row["code"]: row for row in RiskMonitor().get_portfolio_data()["positions"]}
     rows, alerts = [], []
     total_value = 0
     for item in portfolio:
-        fields = quotes.get(_quote.code_prefix(item["code"]))
-        info = _fields_info(fields) if fields else {}
-        price = info.get("price", 0)
+        position = positions.get(item["code"], {})
+        price = position.get("price") or 0
+        today_pnl = position.get("today_profit")
         value = price * item["shares"]
         total_value += value
         closes = _quote.get_closes(item["code"], 120) or []
@@ -1640,7 +1684,7 @@ def _portfolio_health_data():
         row = {
             "code": item["code"], "name": item.get("name", item["code"]), "price": price,
             "value": round(value, 2), "pnl": round(pnl, 2), "pnl_pct": round(pnl_pct, 2),
-            "today_pnl": round(value * info.get("change_pct", 0) / (100 + info.get("change_pct", 0)), 2) if info.get("change_pct", 0) != -100 else 0,
+            "today_pnl": round(today_pnl, 2) if today_pnl is not None else None,
             "drawdown_120_pct": round(drawdown, 2) if drawdown is not None else None,
             "above_ma20": bool(ma20 and price >= ma20), "health_score": max(0, score), "flags": flags,
         }
@@ -2085,7 +2129,7 @@ def api_trades_add():
 
     trade = {
         "id": uuid.uuid4().hex,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "date": datetime.now(MARKET_TZ).strftime("%Y-%m-%d %H:%M"),
         "code": code,
         "name": name or code,
         "action": action,
@@ -2158,6 +2202,10 @@ def api_trades_edit():
             trade[key] = data[key]
     trade["code"] = str(trade.get("code") or "").strip()
     trade["action"] = str(trade.get("action") or "").strip().lower()
+    if trade["action"] != "buy" or data.get("opening_balance") is False:
+        trade.pop("opening_balance", None)
+    elif data.get("opening_balance") is True:
+        trade["opening_balance"] = True
     trade["date"] = str(trade.get("date") or "").strip()
     if not trade["date"]:
         return jsonify({"error": "date 不能为空"}), 400

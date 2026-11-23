@@ -249,15 +249,14 @@ def get_market_breadth(ttl=BREADTH_TTL) -> dict:
             }
             if extra_filter:
                 params["filter"] = extra_filter
-            # 单次统计的重试共享连接，避免反复建立 Session。
+            # 失败后由短缓存到期的下一次刷新重试。
             with _session() as session:
-                for _ in range(3):
-                    try:
-                        response = session.get(base, params=params, timeout=6, headers=_EM_HEADERS)
-                        if response.status_code == 200:
-                            return response.json().get("data", {}).get("total", 0) or 0
-                    except Exception:
-                        time.sleep(0.3)
+                try:
+                    response = session.get(base, params=params, timeout=(3, 4), headers=_EM_HEADERS)
+                    if response.status_code == 200:
+                        return (response.json().get("data") or {}).get("total")
+                except (requests.RequestException, ValueError):
+                    pass
             return None
 
         total = _count()

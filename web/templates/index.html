@@ -10,8 +10,8 @@
         :root {
             --primary: #a84c35;
             --primary-light: #f3e5d8;
-            --danger: #d93025;
-            --success: #188038;
+            --danger: #985456;
+            --success: #43735c;
             --bg: #f8f5ee;
             --card-bg: #fffcf6;
             --text: #2d2822;
@@ -106,7 +106,10 @@
             margin-bottom: 14px;
         }
         .index-card .name { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
-        .index-card .price { font: 500 clamp(15px, 3vw, 26px) Georgia, serif; margin-bottom: 2px; }
+        .index-card .price { font: 500 clamp(15px, 3vw, 26px) Consolas, monospace; margin-bottom: 2px; }
+        .index-card .change, .stat-item .value, .flow-value, #sectorDynamics .list-item > :last-child {
+            font-variant-numeric: tabular-nums;
+        }
         .index-card .change { font-size: 14px; font-weight: 500; }
         .up { color: var(--danger); }
         .down { color: var(--success); }
@@ -114,10 +117,11 @@
         /* Stats row */
         .stats-row { display: flex; gap: 12px; margin-bottom: 20px; }
         .stat-item {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 12px 16px;
-            box-shadow: var(--shadow);
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 8px;
+            padding: 4px;
             flex: 1;
             text-align: center;
         }
@@ -224,14 +228,27 @@
         .portfolio-table th, .portfolio-table td { padding: 10px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
         .portfolio-table th:first-child, .portfolio-table td:first-child { padding-left: 0; text-align: left; }
         .portfolio-table thead th { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+        .portfolio-table tbody td { padding-block: 14px; border-bottom-color: #eae6e0; }
         .portfolio-table td small { margin-left: 5px; color: var(--text-secondary); }
+        .portfolio-table td:first-child small { display: block; margin: 3px 0 0; font-size: 11px; color: #706c67; }
+        .portfolio-table td:not(:first-child), .portfolio-metric-value { font-family: Consolas, monospace; }
+        .portfolio-day-up { color: #985456; }
+        .portfolio-day-down { color: #43735c; }
         .portfolio-totals { padding-top: 12px; font-size: 12px; color: var(--text-secondary); }
-        .portfolio-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--border); margin-bottom: 20px; }
+        .portfolio-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--border); margin-bottom: 20px; }
         .portfolio-metric { padding: 12px clamp(6px, 1.5vw, 16px); min-width: 0; }
         .portfolio-metric + .portfolio-metric { border-left: 1px solid var(--border); }
         .portfolio-metric-label, .portfolio-metric details { color: var(--text-secondary); font-size: 12px; }
-        .portfolio-metric-value { font: 500 clamp(17px, 3vw, 27px) Georgia, "Songti SC", serif; font-variant-numeric: tabular-nums; }
+        .portfolio-metric-value { font-size: clamp(17px, 3vw, 27px); font-weight: 500; font-variant-numeric: tabular-nums; }
+        #portfolioHoldingRatio { font-weight: 650; }
         .portfolio-metric p { display: flex; gap: 4px; flex-wrap: wrap; justify-content: space-between; }
+        .holding-funds-form { display: flex; gap: 6px; margin-top: 6px; }
+        .holding-funds-form input { min-width: 0; width: 100%; }
+        @media (max-width: 640px) {
+            .portfolio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .portfolio-metric:nth-child(3) { border-left: 0; }
+            .portfolio-metric:nth-child(n + 3) { border-top: 1px solid var(--border); }
+        }
         .portfolio-sort { cursor: pointer; border: 0; background: transparent; color: inherit; font: inherit; }
         .trade-ledger { position: relative; }
         .trade-ledger summary { cursor: pointer; margin-bottom: 8px; }
@@ -291,7 +308,6 @@
 
                 <div class="overview-position">
                     <div id="portfolioSummary" role="status">加载中</div>
-                    <button class="quick-btn" onclick="showTab(1)">查看持仓</button>
                 </div>
                 <details class="card secondary-panel">
                     <summary>板块 ETF 成交额</summary>
@@ -307,7 +323,18 @@
                         <div class="portfolio-metric-value" id="portfolioMarketValue">—</div>
                     </div>
                     <div class="portfolio-metric">
-                        <div class="portfolio-metric-label">今日盈亏</div>
+                        <div class="portfolio-metric-label">仓位</div>
+                        <div class="portfolio-metric-value" id="portfolioHoldingRatio">—</div>
+                        <details id="holdingFundsEditor">
+                            <summary>编辑金额</summary>
+                            <form class="holding-funds-form" onsubmit="saveHoldingFunds(event)">
+                                <input id="holdingFundsInput" type="number" min="0" step="0.01" aria-label="总仓位持有资金" placeholder="金额">
+                                <button type="submit">保存</button>
+                            </form>
+                        </details>
+                    </div>
+                    <div class="portfolio-metric">
+                        <div class="portfolio-metric-label" title="含今日已清仓证券的盈亏">今日盈亏</div>
                         <div class="portfolio-metric-value" id="portfolioToday">—</div>
                     </div>
                     <div class="portfolio-metric">
@@ -325,7 +352,7 @@
                     <h3>我的持仓 <button onclick="togglePortfolioEdit()" style="float:right;font-size:12px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:white;cursor:pointer">管理</button></h3>
                     <div id="portfolioList"><div class="loading">加载中</div></div>
                     <div id="portfolioEdit" style="display:none;border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
-                        <div style="font-size:13px;font-weight:500;margin-bottom:8px">添加持仓</div>
+                        <div style="font-size:13px;font-weight:500;margin-bottom:8px">补录已有持仓</div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                             <div class="security-picker">
                                 <input type="text" id="addCode" placeholder="代码或简称" aria-label="持仓证券代码或简称" maxlength="30" autocomplete="off" aria-controls="addCodeSuggestions">
@@ -372,13 +399,13 @@
                 <div class="card">
                     <div class="watch-toolbar watch-heading">
                         <button type="button" class="quick-btn" id="watchManage" aria-pressed="false" onclick="toggleWatchManagement()">管理</button>
-                        <button type="button" class="quick-btn watch-primary" id="watchAddButton" aria-controls="watchAddPanel" aria-expanded="false" onclick="toggleWatchAdd()">＋ 添加自选</button>
+                        <button type="button" class="quick-btn watch-primary" id="watchAddButton" aria-controls="watchAddPanel" aria-expanded="false" onclick="toggleWatchAdd()">添加</button>
 
-                        <select id="watchGroupFilter" aria-label="自选分组" onchange="updateWatchlistView()"><option value="all">全部分组</option></select>
-                        <button type="button" class="quick-btn" id="watchAlertsFilter" aria-pressed="false" onclick="toggleWatchAlerts()">只看预警</button>
                         <details class="watch-advanced">
                             <summary>筛选与排序</summary>
                             <div class="watch-toolbar">
+                                <select id="watchGroupFilter" aria-label="自选分组" onchange="updateWatchlistView()"><option value="all">全部分组</option></select>
+                                <button type="button" class="quick-btn" id="watchAlertsFilter" aria-pressed="false" onclick="toggleWatchAlerts()">只看预警</button>
                                 <select id="watchStateFilter" aria-label="行情状态" onchange="updateWatchlistView()">
                                     <option value="all">全部状态</option><option value="held">只看持仓</option>
                                     <option value="watch">只看观察</option><option value="up">只看上涨</option>
@@ -415,7 +442,6 @@
             <!-- Tab 3: 板块 -->
             <div class="tab-content" id="tab-3">
                 <div class="card">
-                    <h3>板块动态</h3>
                     <div id="sectorDynamics"><div class="loading">加载中</div></div>
                 </div>
             </div>
@@ -423,17 +449,15 @@
             <!-- Tab 4: 新闻 -->
             <div class="tab-content" id="tab-4">
                 <div class="card">
-                    <h3>财经新闻
-                        <span id="newsUpdated" style="float:right;font-size:11px;color:var(--text-secondary);font-weight:400"></span>
-                    </h3>
                     <div style="display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;align-items:center">
                         <input type="text" id="newsSearch" placeholder="搜索关键词" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px" oninput="renderDailyNews()">
                         <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
                             <input type="checkbox" id="newsOnlyRelated" onchange="renderDailyNews()"> 只看与我相关
                         </label>
                         <select id="newsCategories" aria-label="新闻分类" onchange="setNewsCategory(this.value)"></select>
-                        <button onclick="loadDailyNews()" style="padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">刷新</button>
+                        <button class="quick-btn" onclick="loadDailyNews()">刷新</button>
                         <button class="quick-btn" onclick="loadDailyNews(true)">AI 判级</button>
+                        <small id="newsUpdated" class="watch-count"></small>
                     </div>
                     <div id="dailyNewsList"><div class="loading">加载中</div></div>
                 </div>
@@ -565,7 +589,7 @@
 
         function loadTabData(index) {
             const loaderNames = {
-                0: ['loadMarketOverview', 'loadSectorFlow', 'loadPortfolio'],
+                0: ['loadMarketOverview', 'loadMarketBreadth', 'loadSectorFlow', 'loadPortfolio'],
                 1: ['loadPortfolio', 'loadTrades'],
                 2: ['loadWatchlist', 'loadVisibleSignals'],
                 3: ['loadBankNews'],
@@ -618,18 +642,27 @@
 
         async function loadMarketOverview() {
             try {
-                const resp = await fetchWithTimeout("/api/market-overview");
+                const resp = await fetchWithTimeout("/api/market-overview?part=indices");
                 const data = await resp.json();
                 if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
                 const grid = document.getElementById("indicesGrid");
                 grid.innerHTML = data.indices.map(idx => `
                     <div class="index-card">
                         <div class="name">${escapeHtml(idx.name || '')}</div>
-                        <div class="price ${idx.change_pct >= 0 ? 'up' : 'down'}">${idx.price.toFixed(2)}</div>
+                        <div class="price">${idx.price.toFixed(2)}</div>
                         <div class="change ${idx.change_pct >= 0 ? 'up' : 'down'}">${idx.change_pct >= 0 ? '+' : ''}${idx.change_pct.toFixed(2)}%</div>
                     </div>
                 `).join("");
-                const stats = data.stats;
+            } catch (e) {
+                document.getElementById("indicesGrid").textContent = "指数加载失败";
+            }
+        }
+
+        async function loadMarketBreadth() {
+            try {
+                const resp = await fetchWithTimeout("/api/market-overview?part=breadth");
+                if (!resp.ok) throw new Error();
+                const {stats} = await resp.json();
                 const fmt = v => (v === null || v === undefined) ? "—" : v;
                 document.getElementById("statsRow").innerHTML = `
                     <div class="stat-item"><div class="label">上涨</div><div class="value up">${fmt(stats.up)}</div></div>
@@ -637,11 +670,12 @@
                     <div class="stat-item"><div class="label">平盘</div><div class="value">${fmt(stats.flat)}</div></div>
                 `;
             } catch (e) {
-                document.getElementById("indicesGrid").innerHTML = `<div style="color:var(--danger);padding:12px;">加载失败: ${escapeHtml(e.message)}</div>`;
+                document.getElementById("statsRow").textContent = "涨跌家数暂不可用";
             }
         }
 
         async function loadSectorFlow() {
+            if (!document.getElementById("sectorList").closest("details").open) return;
             try {
                 const resp = await fetchWithTimeout("/api/sector-flow");
                 const data = await resp.json();
@@ -707,9 +741,16 @@
         }
 
         async function loadPortfolioEditList() {
-            const resp = await fetch("/api/portfolio/list");
-            const data = await resp.json();
             const el = document.getElementById("portfolioEditList");
+            let data;
+            try {
+                const resp = await fetchWithTimeout("/api/portfolio/list");
+                data = await resp.json();
+                if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+            } catch (error) {
+                el.textContent = `持仓加载失败：${error.message || "请求异常"}`;
+                return;
+            }
             if (!data.portfolio || data.portfolio.length === 0) {
                 el.innerHTML = "<div style='font-size:12px;color:var(--text-secondary)'>暂无持仓</div>";
                 return;
@@ -798,6 +839,38 @@
         bindSecurityPicker("addCode");
         bindSecurityPicker("tradeCode");
 
+        async function writePosition(action, payload, failureMessage) {
+            try {
+                const resp = await fetchWithTimeout(`/api/portfolio/${action}`, {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) throw new Error(data.error || failureMessage);
+                return data;
+            } catch (error) {
+                showToast(error.message || failureMessage);
+                return null;
+            }
+        }
+
+        async function saveHoldingFunds(event) {
+            event.preventDefault();
+            const input = document.getElementById("holdingFundsInput");
+            const button = event.currentTarget.querySelector("button");
+            button.disabled = true;
+            try {
+                const saved = await writePosition("holding-funds", {holding_funds: input.value}, "金额保存失败");
+                if (!saved) return;
+                document.getElementById("holdingFundsEditor").open = false;
+                showToast("持有资金已保存");
+                await loadPortfolio();
+            } finally {
+                button.disabled = false;
+            }
+        }
+
         async function addPosition() {
             const code = document.getElementById("addCode").value.trim();
             const cost = document.getElementById("addCost").value;
@@ -809,36 +882,21 @@
             }
 
             if (!Number.isSafeInteger(shares) || shares <= 0) { showToast("数量必须为正整数"); return; }
-            const resp = await fetch("/api/portfolio/add", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({code, cost: parseFloat(cost), shares})
-            });
-            const data = await resp.json();
-            if (data.success) {
+            const data = await writePosition("add", {code, cost: Number(cost), shares}, "添加失败");
+            if (data) {
                 showToast("添加成功: " + (data.item.name || code));
                 document.getElementById("addCode").value = "";
                 document.getElementById("addCost").value = "";
                 document.getElementById("addShares").value = "";
                 await refreshPortfolioDependents();
-            } else {
-                showToast(data.error || "添加失败");
             }
         }
 
         async function deletePosition(code) {
             if (!confirm(`确认删除 ${code}？如果只有一笔买入记录，该笔记录也会被撤销。`)) return;
-            const resp = await fetch("/api/portfolio/delete", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({code})
-            });
-            const data = await resp.json();
-            if (data.success) {
+            if (await writePosition("delete", {code}, "删除失败")) {
                 showToast("已删除");
                 await refreshPortfolioDependents();
-            } else {
-                showToast(data.error || "删除失败");
             }
         }
 
@@ -846,21 +904,15 @@
             const stopLoss = document.getElementById(`stop_${code}`).value;
             const takeProfit = document.getElementById(`take_${code}`).value;
             if (!stopLoss || !takeProfit) { showToast("请填写止损和止盈价格"); return; }
-            const resp = await fetch("/api/portfolio/update", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({code, stop_loss: parseFloat(stopLoss), take_profit: parseFloat(takeProfit)})
-            });
-            const data = await resp.json();
-            if (data.success) {
+            const payload = {code, stop_loss: Number(stopLoss), take_profit: Number(takeProfit)};
+            if (await writePosition("update", payload, "更新失败")) {
                 showToast("风险线已更新");
                 await refreshPortfolioDependents();
-            } else {
-                showToast(data.error || "更新失败");
             }
         }
 
         let portfolioWeightDescending = true;
+        let portfolioRequestId = 0;
 
         function sortPortfolioRows() {
             const table = document.querySelector(".portfolio-table");
@@ -879,27 +931,37 @@
         }
 
         async function loadPortfolio() {
+            const requestId = ++portfolioRequestId;
             const list = document.getElementById("portfolioList");
             const overview = document.getElementById("portfolioSummary");
-            const summaryIds = ["portfolioMarketValue", "portfolioToday", "portfolioCumulative", "portfolioRealized", "portfolioUnrealized"];
+            const summaryIds = ["portfolioMarketValue", "portfolioHoldingRatio",
+                "portfolioToday", "portfolioCumulative", "portfolioRealized", "portfolioUnrealized"];
             try {
                 const resp = await fetchWithTimeout("/api/portfolio");
                 const data = await resp.json();
+                if (requestId !== portfolioRequestId) return;
                 if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
 
                 const price = value => value == null ? "—" : value.toLocaleString("zh-CN", {maximumFractionDigits: 4});
                 const money = value => value.toLocaleString("zh-CN", {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                function change(value, suffix = "") {
+                const ratio = value => value == null ? "—" :
+                    value.toLocaleString("zh-CN", {style: "percent", maximumFractionDigits: 2});
+                function change(value, suffix = "", daily = false) {
                     if (value == null) return "—";
-                    const color = value > 0 ? "up" : value < 0 ? "down" : "";
-                    return `<span class="${color}">${value > 0 ? "+" : ""}${money(value)}${suffix}</span>`;
+                    const formatted = `${value > 0 ? "+" : ""}${money(value)}${suffix}`;
+                    if (!daily || value === 0) return formatted;
+                    return `<span class="portfolio-day-${value > 0 ? "up" : "down"}">${formatted}</span>`;
                 }
                 const totals = data.totals;
+                if (!document.getElementById("holdingFundsEditor").open) {
+                    document.getElementById("holdingFundsInput").value = totals.holding_funds ?? "";
+                }
                 const values = [
-                    totals.value == null ? "行情不全" : `${money(totals.value)} 元`,
-                    totals.today_profit == null ? "行情不全" : change(totals.today_profit, " 元"),
-                    totals.cumulative == null ? "行情不全" : change(totals.cumulative, " 元"),
-                    change(totals.realized, " 元"), change(totals.profit, " 元"),
+                    totals.value == null ? "行情不全" : money(totals.value),
+                    ratio(totals.holding_ratio),
+                    totals.today_profit == null ? "行情不全" : change(totals.today_profit, "", true),
+                    totals.cumulative == null ? "行情不全" : change(totals.cumulative),
+                    change(totals.realized), change(totals.profit),
                 ];
                 summaryIds.forEach((id, index) => { document.getElementById(id).innerHTML = values[index]; });
 
@@ -918,20 +980,21 @@
                                 <td>${escapeHtml(row.name)} <small>${escapeHtml(row.code)}</small></td>
                                 <td>${row.weight_pct == null ? "—" : `${row.weight_pct.toFixed(2)}%`}</td>
                                 <td>${price(row.price)}</td><td>${price(row.cost)}</td><td>${price(row.shares)}</td>
-                                <td>${change(row.change_pct, "%")}</td><td>${change(row.today_profit, " 元")}</td>
-                                <td>${change(row.profit, " 元")} <small>${change(row.profit_pct, "%")}</small></td>
+                                <td>${change(row.change_pct, "%")}</td><td>${change(row.today_profit, "", true)}</td>
+                                <td>${change(row.profit)} <small>${change(row.profit_pct, "%")}</small></td>
                             </tr>`).join("")}</tbody>
                         </table>
                     </div>
-                    <div class="portfolio-totals">总投入 ${money(totals.cost)} 元</div>`;
+                    <div class="portfolio-totals">总投入 ${money(totals.cost)}</div>`;
                 list.querySelector(".portfolio-sort").addEventListener("click", () => {
                     portfolioWeightDescending = !portfolioWeightDescending;
                     sortPortfolioRows();
                 });
                 sortPortfolioRows();
                 overview.innerHTML = totals.profit == null ? "行情不全" :
-                    `持仓盈亏 ${change(totals.profit, " 元")}（${change(totals.profit_pct, "%")}）`;
+                    `持仓盈亏 ${change(totals.profit)}（${change(totals.profit_pct, "%")}）`;
             } catch (error) {
+                if (requestId !== portfolioRequestId) return;
                 list.textContent = overview.textContent = `加载失败：${error.message || "请求异常"}`;
                 summaryIds.forEach(id => { document.getElementById(id).textContent = "—"; });
             }
@@ -1120,7 +1183,10 @@
                 const title = escapeHtml(n.title || "");
                 const headline = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
                 const meta = [n.ago || n.time, n.source, ...(n.matched || [])].filter(Boolean).map(escapeHtml).join(" · ");
-                const details = [n.summary, n.reason].filter(Boolean).map(text => `<p>${escapeHtml(text)}</p>`).join("");
+                const detailTexts = new Set([n.summary, n.reason].map(text => (text || "").trim()));
+                detailTexts.delete("");
+                detailTexts.delete((n.title || "").trim());
+                const details = [...detailTexts].map(text => `<p>${escapeHtml(text)}</p>`).join("");
                 return `<article class="news-row"><div>${headline}${n.sentiment && n.sentiment !== "中性" ? sentimentTag(n.sentiment) : ""}</div>
                     <small>${meta}</small>${details ? `<details><summary>摘要</summary>${details}</details>` : ""}</article>`;
             }).join("");
@@ -1144,7 +1210,9 @@
                 window._sectorData = sectors;
 
                 let html = '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">';
-                sectors.forEach((sector, i) => {
+                if (sectors.length === 1) {
+                    html += `<strong>${escapeHtml(sectors[0].name || '关注板块')}</strong>`;
+                } else sectors.forEach((sector, i) => {
                     html += `<button onclick="showSectorTab(${i})" class="quick-btn sector-tab" data-idx="${i}" style="${i===0?'background:var(--primary-light);border-color:var(--primary);color:var(--primary)':''}">${escapeHtml(sector.name || '未命名板块')}</button>`;
                 });
                 html += '</div>';
@@ -1292,13 +1360,14 @@
             }
         }
 
-        function editTrade(index, id, action, code, price, shares) {
+        function editTrade(index, id, action, code, price, shares, openingBalance) {
             const row = document.getElementById(`trade-row-${index}`);
             if (!row) return;
             row.innerHTML = `
                 <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
                     <select id="edit-action-${index}" style="padding:3px;border:1px solid var(--border);border-radius:3px;font-size:11px">
-                        <option value="buy" ${action==='buy'?'selected':''}>买入</option>
+                        <option value="buy" ${action==='buy' && !openingBalance?'selected':''}>买入</option>
+                        <option value="opening" ${openingBalance?'selected':''}>期初持仓</option>
                         <option value="sell" ${action==='sell'?'selected':''}>卖出</option>
                     </select>
                     <input id="edit-code-${index}" value="${code}" style="width:55px;padding:3px;border:1px solid var(--border);border-radius:3px;font-size:11px">
@@ -1311,7 +1380,9 @@
         }
 
         async function saveEditTrade(index, id = '') {
-            const action = document.getElementById(`edit-action-${index}`).value;
+            const tradeType = document.getElementById(`edit-action-${index}`).value;
+            const openingBalance = tradeType === "opening";
+            const action = openingBalance ? "buy" : tradeType;
             const code = document.getElementById(`edit-code-${index}`).value.trim();
             const price = parseFloat(document.getElementById(`edit-price-${index}`).value);
             const shares = document.getElementById(`edit-shares-${index}`).valueAsNumber;
@@ -1321,7 +1392,7 @@
             const resp = await fetch("/api/trades/edit", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({index, id, action, code, price, shares})
+                body: JSON.stringify({index, id, action, code, price, shares, opening_balance: openingBalance})
             });
             const data = await resp.json();
             if (resp.ok && data.success) {
@@ -1360,11 +1431,11 @@
                     <span style="font-size:12px">
                         <span style="color:${t.action==='buy'?'var(--danger)':'var(--success)'};font-weight:500">${t.opening_balance && t.action==='buy'?'期初持仓':t.action==='buy'?'买入':'卖出'}</span>
                         ${escapeHtml(t.name || '')}(${escapeHtml(t.code || '')}) ${t.shares}份 @${t.price}
-                        ${t.profit !== undefined ? `<span style="margin-left:6px;font-weight:500;color:${t.profit>=0?'var(--danger)':'var(--success)'}">${t.profit>=0?'+':''}${t.profit}元(${t.profit_pct>=0?'+':''}${t.profit_pct}%)</span>` : ''}
+                        ${t.profit !== undefined ? `<span style="margin-left:6px;font-weight:500;color:${t.profit>=0?'var(--danger)':'var(--success)'}">${t.profit>=0?'+':''}${t.profit} (${t.profit_pct>=0?'+':''}${t.profit_pct}%)</span>` : ''}
                     </span>
                     <span style="font-size:11px;color:var(--text-secondary)">
-                        ${escapeHtml(t.date || '')}
-                        <button onclick="editTrade(${t._index}, '${t.id || ''}', '${t.action}', '${t.code}', ${t.price}, ${t.shares})" style="margin-left:4px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;background:white;cursor:pointer;font-size:10px;color:var(--primary)">改</button>
+                        ${t.opening_balance ? '录入 ' : ''}${escapeHtml(t.date || '')}
+                        <button onclick="editTrade(${t._index}, '${t.id || ''}', '${t.action}', '${t.code}', ${t.price}, ${t.shares}, ${Boolean(t.opening_balance)})" style="margin-left:4px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;background:white;cursor:pointer;font-size:10px;color:var(--primary)">改</button>
                         <button onclick="deleteTrade(${t._index}, '${t.id || ''}')" style="margin-left:2px;padding:1px 4px;border:1px solid var(--border);border-radius:3px;background:white;cursor:pointer;font-size:10px;color:var(--text-secondary)">×</button>
                     </span>
                 </div>`;
@@ -1387,8 +1458,10 @@
                 buttons[next]?.focus();
             });
             scheduleVisibleRefresh(loadMarketOverview, 3 * 60 * 1000, [0]);
+            scheduleVisibleRefresh(loadMarketBreadth, 3 * 60 * 1000, [0]);
+            document.getElementById("sectorList").closest("details").addEventListener("toggle", () => runLoader(loadSectorFlow));
             scheduleVisibleRefresh(loadSectorFlow, 5 * 60 * 1000, [0]);
-            scheduleVisibleRefresh(loadPortfolio, 90 * 1000, [0, 1]);
+            scheduleVisibleRefresh(loadPortfolio, 15 * 1000, [0, 1]);
             scheduleVisibleRefresh(loadVisibleSignals, 5 * 60 * 1000, [2]);
             // 与后端15秒行情缓存对齐，避免自选涨跌幅长期滞后。
             scheduleVisibleRefresh(loadWatchlist, 15 * 1000, [2]);
@@ -1449,7 +1522,7 @@
         .overview-position { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-top:1px solid var(--border); }
         .secondary-panel { margin:8px 0; }
         .secondary-panel > summary { cursor:pointer; padding:6px 0; font-weight:500; }
-        .news-row { padding:10px 0; border-bottom:1px solid var(--border); line-height:1.5; }
+        .news-row { padding:14px 0; border-bottom:1px solid #eae6e0; line-height:1.5; }
         .news-row a { color:var(--text); text-decoration:none; }
         .news-row a:hover { text-decoration:underline; }
         .news-row small, .news-row details { color:var(--text-secondary); font-size:12px; }
@@ -1477,6 +1550,9 @@
         .watch-table th { font-size:12px; font-weight:500; color:var(--text-secondary); }
         .watch-table th:first-child, .watch-table td:first-child { text-align:left; padding-left:0; }
         .watch-table small, .watch-empty { color:var(--text-secondary); }
+        .watch-table tbody td { padding-block:14px; border-bottom-color:#eae6e0; }
+        .watch-table tbody td:nth-child(2), .watch-table tbody td:nth-child(3), .watch-table tbody td:nth-child(5) { font-family:Consolas, monospace; }
+        .watch-ticker small { display:block; font-size:11px; text-align:left; }
         .watch-empty { margin-top:12px; font-size:13px; }
         .watch-ticker { border:0; background:transparent; font:inherit; color:var(--text); cursor:pointer; text-align:left; }
         .watch-ticker:hover { color:var(--primary); }
@@ -1492,7 +1568,8 @@
         .alert-info { border-left:3px solid var(--primary); padding-left:8px; }
 
         @media (max-width:700px) {
-            .insight-grid,.metric-grid { grid-template-columns:1fr 1fr; }
+            .insight-grid { grid-template-columns:1fr; }
+            .metric-grid { grid-template-columns:1fr 1fr; }
             .tab-bar { padding:10px 12px 8px; }
             .tab-content { padding:12px; }
             .watch-bulk-grid { grid-template-columns:1fr 1fr; }
@@ -1678,7 +1755,8 @@
             };
             if (comparators[sort]) items.sort(comparators[sort]);
             const count = document.getElementById("watchCount");
-            const countText = meta.stale ? "刷新失败，显示上次结果" : `显示 ${items.length} / ${allItems.length} 只`;
+            const countText = meta.stale ? "刷新失败，显示上次结果" :
+                items.length < allItems.length ? `${items.length} / ${allItems.length} 只` : "";
             if (count.textContent !== countText) count.textContent = countText;
 
             if (!items.length) {
@@ -1905,7 +1983,7 @@
             try {
                 const data = await (await fetch('/api/alerts')).json();
                 if (data.error) throw new Error(data.error);
-                document.getElementById('alertCount').textContent = data.unread_count ? `未读 ${data.unread_count}` : '暂无未读';
+                document.getElementById('alertCount').textContent = data.unread_count ? `未读 ${data.unread_count}` : '';
                 el.innerHTML = (data.alerts || []).map(a => `<div class="alert-row alert-${a.level}"><div style="display:flex;justify-content:space-between;gap:8px"><b style="font-size:12px">${escHtml(a.title)}</b><span class="tag">${escHtml(a.source)}</span></div><div style="font-size:11px;margin-top:3px">${escHtml(a.message)}</div><div style="font-size:10px;color:var(--text-secondary);margin-top:3px">${escHtml(a.action || '')}</div><div style="margin-top:5px"><button class="quick-btn" onclick="actAlert('${a.id}','ack')" style="font-size:10px;padding:2px 7px">已读</button><button class="quick-btn" onclick="actAlert('${a.id}','dismiss')" style="font-size:10px;padding:2px 7px">忽略</button></div></div>`).join('') || '<div style="font-size:12px;color:var(--text-secondary)">当前没有触发中的预警</div>';
             } catch(e) { el.innerHTML = `<div style="color:var(--danger)">${escHtml(e.message)}</div>`; }
         }

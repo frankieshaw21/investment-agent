@@ -1,12 +1,14 @@
 """
 风控监控 Agent - 监控持仓股票异动，触发预警
 """
+import json
 import math
 import os
 from datetime import datetime
 from statistics import pstdev
 
 from tools import quote as _quote
+from tools.trading_calendar import MARKET_TZ
 
 
 class RiskMonitor:
@@ -31,7 +33,6 @@ class RiskMonitor:
 
     def _load_portfolio(self):
         """从 portfolio.json 加载持仓"""
-        import json
         portfolio_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
         if os.path.exists(portfolio_file):
             with open(portfolio_file, "r", encoding="utf-8") as f:
@@ -51,7 +52,6 @@ class RiskMonitor:
 
     def _load_watchlist(self):
         """从 watchlist.json 加载自选股"""
-        import json
         watchlist_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "watchlist.json")
         if os.path.exists(watchlist_file):
             with open(watchlist_file, "r", encoding="utf-8") as f:
@@ -597,13 +597,47 @@ class RiskMonitor:
 
         return alerts
 
-    def get_portfolio_data(self):
+    def _today_trade_flows(self, trades=None):
+        """按证券汇总今天的净买入数量和净支出。"""
+        today = datetime.now(MARKET_TZ).date().isoformat()
+        if trades is None:
+            trades_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.json")
+            try:
+                with open(trades_file, encoding="utf-8") as file:
+                    trades = json.load(file)
+            except FileNotFoundError:
+                trades = []
+
+        flows = {}
+        for trade in trades:
+            code = trade.get("code")
+            if not code or str(trade.get("date", ""))[:10] != today:
+                continue
+            if trade.get("opening_balance") and trade.get("action") == "buy":
+                # 已有持仓录入当天也按昨收计价，避免触发首次买入日的兼容逻辑。
+                flows.setdefault(code, (0, 0))
+                continue
+            if trade.get("action") not in ("buy", "sell"):
+                continue
+            shares = trade["shares"] if trade["action"] == "buy" else -trade["shares"]
+            net_shares, net_cost = flows.get(code, (0, 0))
+            flows[code] = net_shares + shares, net_cost + shares * trade["price"]
+        return today, flows
+
+    def get_portfolio_data(self, trades=None):
         """返回持仓、当日表现和汇总；缺行情时保留持仓行。"""
         symbols = {
             code: _quote.code_prefix(f"{pos.get('market') or ''}{code}")
             for code, pos in self.portfolio.items()
         }
-        quotes = _quote.get_quotes(list(symbols.values())) if symbols else {}
+        today, flows = self._today_trade_flows(trades)
+        closed_flows = {code: flow for code, flow in flows.items() if code not in symbols}
+        closed_symbols = {
+            code: _quote.code_prefix(code)
+            for code, (net_shares, _) in closed_flows.items() if net_shares < 0
+        }
+        quote_symbols = [*symbols.values(), *closed_symbols.values()]
+        quotes = _quote.get_quotes(quote_symbols) if quote_symbols else {}
 
         def number(fields, index):
             try:
@@ -624,26 +658,45 @@ class RiskMonitor:
             cost = pos["cost"]
             cost_value = cost * shares
             market_value = price * shares if price is not None else None
+            # 旧持仓只有首次买入日时，用已登记的成本计算当天新建仓的盈亏。
+            net_shares, net_cost = flows.get(code, (0, 0))
+            if code not in flows and pos.get("first_buy_date") == today:
+                net_shares, net_cost = shares, cost_value
+            opening_shares = shares - net_shares
+            today_profit = None
+            if market_value is not None:
+                if opening_shares == 0:
+                    today_profit = market_value - net_cost
+                elif opening_shares > 0 and prev_close and prev_close > 0:
+                    today_profit = market_value - opening_shares * prev_close - net_cost
             total_cost += cost_value
             if market_value is not None:
                 total_value += market_value
             rows.append({
                 "code": code, "name": pos["name"], "cost": cost, "shares": shares, "price": price,
                 "change_pct": number(fields, _quote.F_CHANGE_PCT) if price is not None else None,
-                "today_profit": (price - prev_close) * shares if price is not None and prev_close and prev_close > 0 else None,
+                "today_profit": today_profit,
                 "market_value": market_value,
                 "profit": market_value - cost_value if market_value is not None else None,
                 "profit_pct": (price / cost - 1) * 100 if price is not None and cost > 0 else None,
             })
         complete = all(row["price"] is not None for row in rows)
-        today_complete = all(row["today_profit"] is not None for row in rows)
+        daily_profits = [row["today_profit"] for row in rows]
+        for code, (net_shares, net_cost) in closed_flows.items():
+            if net_shares == 0:
+                daily_profits.append(-net_cost)
+            elif net_shares < 0:
+                prev_close = number(quotes.get(closed_symbols[code]) or [], _quote.F_PREV_CLOSE)
+                daily_profits.append(net_shares * prev_close - net_cost if prev_close and prev_close > 0 else None)
+            else:
+                daily_profits.append(None)
         for row in rows:
             row["weight_pct"] = row["market_value"] / total_value * 100 if complete and total_value > 0 else None
         return {
             "positions": rows,
             "totals": {
                 "cost": total_cost,
-                "today_profit": sum(row["today_profit"] for row in rows) if today_complete else None,
+                "today_profit": sum(daily_profits) if all(value is not None for value in daily_profits) else None,
                 "value": total_value if complete else None,
                 "profit": total_value - total_cost if complete else None,
                 "profit_pct": (total_value / total_cost - 1) * 100 if complete and total_cost > 0 else None,
