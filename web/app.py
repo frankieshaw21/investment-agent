@@ -32,7 +32,7 @@ load_dotenv(_ENV_FILE)
 
 from tools import quote as _quote
 from tools.portfolio_tracker import SnapshotQuoteError, record_daily_snapshot
-from tools.trading_calendar import MARKET_TZ, RISK_CHECK_TIMES, is_trading_day
+from tools.trading_calendar import MARKET_TZ, RISK_CHECK_TIMES, cached_trading_day, is_trading_day
 
 app = Flask(__name__)
 
@@ -935,6 +935,32 @@ def _realized_profit(trades=None):
     return sum(t.get("profit", 0) for t in trades if t.get("action") == "sell")
 
 
+def _portfolio_refresh_delay(portfolio, now):
+    """Use 15-second polling while quotes can move and 2 minutes otherwise."""
+    if now.weekday() >= 5 or not portfolio:
+        return 120
+
+    markets = {_quote.code_prefix(f"{item.get('market') or ''}{code}")[:2]
+               for code, item in portfolio.items()}
+    sessions = []
+    # 结束时间留一分钟，让轮询能取到收盘行情。
+    if markets - {"hk"} and cached_trading_day(now.date()) is not False:
+        sessions.extend([((9, 15), (11, 31)), ((13, 0), (15, 1))])
+    if "hk" in markets:
+        # 港股包含延续早市，统一使用工作日的全日交易窗口。
+        sessions.append(((9, 0), (16, 11)))
+
+    delay = 120
+    for (start_hour, start_minute), (end_hour, end_minute) in sessions:
+        start = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        end = now.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+        if start <= now < end:
+            return 15
+        if now < start:
+            delay = min(delay, max(15, math.ceil((start - now).total_seconds())))
+    return delay
+
+
 @app.route("/api/portfolio", methods=["GET"])
 def api_portfolio():
     from agents import RiskMonitor
@@ -954,7 +980,8 @@ def api_portfolio():
     totals["cumulative"] = realized + totals["profit"] if totals["profit"] is not None else None
     # 首页不展示本接口的 alerts；默认跳过昂贵的整份自选预警计算。
     alerts = monitor.check_all() if request.args.get("include_alerts") == "1" else []
-    return jsonify({"summary": summary, "alerts": alerts, **data})
+    refresh_seconds = _portfolio_refresh_delay(monitor.portfolio, datetime.now(MARKET_TZ))
+    return jsonify({"summary": summary, "alerts": alerts, "refresh_seconds": refresh_seconds, **data})
 
 
 @app.route("/api/profit-summary", methods=["GET"])
