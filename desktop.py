@@ -79,9 +79,9 @@ if __name__ == "__main__":
         </div>
         </body></html>
         """,
-        width=1400,
-        height=900,
-        min_size=(1000, 600),
+        width=696,
+        height=420,
+        min_size=(696, 420),
         text_select=True,
     )
 

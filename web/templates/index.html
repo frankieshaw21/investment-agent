@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DataBoard</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='databoard.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='fundamentals.css') }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -27,8 +28,8 @@
         }
         .main-layout {
             display: grid;
-            grid-template-columns: 172px minmax(0, 1fr);
-            max-width: 1120px;
+            grid-template-columns: 200px minmax(0, 1fr);
+            max-width: 1600px;
             min-height: 100vh;
             margin: 0 auto;
         }
@@ -68,16 +69,16 @@
             font-weight: 650;
         }
         .data-panel { min-width: 0; }
-        @media (max-width: 700px) {
-            .main-layout { grid-template-columns: 88px minmax(0, 1fr); }
-            .module-sidebar { padding: 16px 5px; }
-            .module-sidebar-inner { top: 16px; }
-            .module-brand { margin: 0 3px 15px; font-size: 12px; }
-            .tab-btn { padding: 6px 4px; font-size: 13px; }
+        @media (max-width: 760px) {
+            .main-layout { grid-template-columns: minmax(0, 1fr); }
+            .module-sidebar { padding: 12px 16px; border-inline: 0; border-bottom: 1px solid var(--border); }
+            .module-brand { margin: 0 0 8px; }
+            .module-tabs { display: flex; overflow-x: auto; }
+            .tab-btn { width: auto; padding: 6px 9px; }
         }
         .tab-content {
             display: none;
-            padding: 20px;
+            padding: 24px clamp(16px, 3vw, 42px);
         }
         .tab-content.active {
             display: block;
@@ -114,38 +115,22 @@
         /* Indices grid */
         .indices-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            margin-bottom: 20px;
-            border-block: 1px solid var(--border);
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
         }
-        .index-card { padding: 12px clamp(6px, 2vw, 18px); }
-        .index-card + .index-card { border-left: 1px solid var(--border); }
+        .index-card { padding: 12px clamp(8px, 2vw, 18px); background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; }
         .overview-title {
             font: 500 clamp(24px, 4vw, 34px)/1.25 Georgia, "Songti SC", serif;
             margin-bottom: 14px;
         }
-        .index-card .name { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
-        .index-card .price { font: 500 clamp(15px, 3vw, 26px) Consolas, monospace; margin-bottom: 2px; }
-        .index-card .change, .stat-item .value, .flow-value, #sectorDynamics .list-item > :last-child {
+        .index-card .name { font-size: var(--overview-label-size); font-weight: 500; color: var(--text-secondary); margin-bottom: 4px; }
+        .index-card .price { margin-bottom: 2px; }
+        .flow-value, #sectorDynamics .list-item > :last-child {
             font-variant-numeric: tabular-nums;
         }
-        .index-card .change { font-size: 14px; font-weight: 500; }
+        .index-card .change { font-size: var(--overview-data-size); }
         .up { color: var(--danger); }
         .down { color: var(--success); }
-
-        /* Stats row */
-        .stats-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; }
-        .stat-item {
-            display: flex;
-            align-items: baseline;
-            justify-content: center;
-            gap: 8px;
-            padding: 4px;
-            flex: 1;
-            text-align: center;
-        }
-        .stat-item .label { font-size: 11px; color: var(--text-secondary); }
-        .stat-item .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
 
         /* List items */
         .list-item {
@@ -244,37 +229,32 @@
         .security-picker-status { display: block; color: var(--text-secondary); font-size: 11px; }
         .security-picker-status:empty { display: none; }
         .portfolio-table-wrap { overflow-x: auto; }
-        .portfolio-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+        .portfolio-table { width: 100%; border-collapse: collapse; font-size: var(--overview-data-size); font-variant-numeric: tabular-nums; }
         .portfolio-table th, .portfolio-table td { padding: 10px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
         .portfolio-table th:first-child, .portfolio-table td:first-child { padding-left: 0; text-align: left; }
-        .portfolio-table thead th { color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+        .portfolio-table thead th { color: var(--text-secondary); font-size: var(--overview-label-size); font-weight: 500; }
         .portfolio-table tbody td { padding-block: 14px; border-bottom-color: #eae6e0; }
         .portfolio-table td small { margin-left: 5px; color: var(--text-secondary); }
         .portfolio-table td:first-child small { display: block; margin: 3px 0 0; font-size: 11px; color: #706c67; }
-        .portfolio-table td:not(:first-child), .portfolio-metric-value { font-family: Consolas, monospace; }
         .portfolio-day-up { color: #985456; }
         .portfolio-day-down { color: #43735c; }
         .portfolio-totals { padding-top: 12px; font-size: 12px; color: var(--text-secondary); }
-        .portfolio-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--border); margin-bottom: 20px; }
-        .portfolio-metric { padding: 12px clamp(6px, 1.5vw, 16px); min-width: 0; }
-        .portfolio-metric + .portfolio-metric { border-left: 1px solid var(--border); }
-        .portfolio-metric-label, .portfolio-metric details { color: var(--text-secondary); font-size: 12px; }
-        .portfolio-metric-value { font-size: clamp(17px, 3vw, 27px); font-weight: 500; font-variant-numeric: tabular-nums; }
-        #portfolioHoldingRatio { font-weight: 650; }
+        .portfolio-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+        .portfolio-metric { padding: 9px clamp(6px, 1vw, 12px); min-width: 0; background: #f5f0e7; border-radius: 7px; overflow-wrap: anywhere; }
+        .portfolio-metric-label, .portfolio-metric details { color: var(--text-secondary); font-size: var(--overview-label-size); }
+        .portfolio-metric-label { font-weight: 500; }
         .portfolio-metric p { display: flex; gap: 4px; flex-wrap: wrap; justify-content: space-between; }
-        .holding-funds-form { display: flex; gap: 6px; margin-top: 6px; }
+        .holding-funds-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
         .holding-funds-form input { min-width: 0; width: 100%; }
-        @media (max-width: 640px) {
-            .portfolio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .portfolio-metric:nth-child(3) { border-left: 0; }
-            .portfolio-metric:nth-child(n + 3) { border-top: 1px solid var(--border); }
-        }
         .portfolio-sort { cursor: pointer; border: 0; background: transparent; color: inherit; font: inherit; }
         .trade-ledger { position: relative; }
         .trade-ledger summary { cursor: pointer; margin-bottom: 8px; }
         .trade-ledger .trade-entry-button { position: absolute; top: 12px; right: 16px; }
         .trade-ledger #tradeForm { margin-top: 14px; }
-        .dashboard-toolbar { display: flex; justify-content: flex-end; align-items: center; padding: 16px 20px 12px; border-bottom: 1px solid var(--border); }
+        .dashboard-toolbar { display: flex; justify-content: flex-end; padding: 12px clamp(16px, 3vw, 42px) 0; }
+        .module-toolbar { display: flex; margin-bottom: 18px; }
+        .module-toolbar .search-bar, .module-toolbar .fundamental-toolbar { margin: 0; max-width: 100%; }
+        .news-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
         .deepseek-dialog {
             margin: auto;
             width: min(420px, calc(100% - 28px));
@@ -301,8 +281,7 @@
                 <p class="module-brand">DataBoard</p>
                 <div class="module-tabs" role="tablist" aria-label="数据模块" aria-orientation="vertical">
                     <button type="button" id="module-tab-0" class="tab-btn active" role="tab" aria-controls="tab-0" aria-selected="true" tabindex="0" onclick="showTab(0)">总览</button>
-                    <button type="button" id="module-tab-1" class="tab-btn" role="tab" aria-controls="tab-1" aria-selected="false" tabindex="-1" onclick="showTab(1)">持仓</button>
-                    <button type="button" id="module-tab-2" class="tab-btn" role="tab" aria-controls="tab-2" aria-selected="false" tabindex="-1" onclick="showTab(2)">自选</button>
+                    <button type="button" id="module-tab-6" class="tab-btn" role="tab" aria-controls="tab-6" aria-selected="false" tabindex="-1" onclick="showTab(6)">基本面</button>
                     <button type="button" id="module-tab-3" class="tab-btn" role="tab" aria-controls="tab-3" aria-selected="false" tabindex="-1" onclick="showTab(3)">关注板块</button>
                     <button type="button" id="module-tab-4" class="tab-btn" role="tab" aria-controls="tab-4" aria-selected="false" tabindex="-1" onclick="showTab(4)">新闻</button>
                     <button type="button" id="module-tab-5" class="tab-btn" role="tab" aria-controls="tab-5" aria-selected="false" tabindex="-1" onclick="showTab(5)">洞察</button>
@@ -318,149 +297,145 @@
 
             <!-- Tab 0: 总览 -->
             <div class="tab-content active" id="tab-0" role="tabpanel" aria-labelledby="module-tab-0" aria-hidden="false">
-                <div class="search-bar">
-                    <input type="text" id="stockSearch" aria-label="股票或 ETF 代码" placeholder="输入股票代码，如 000001" maxlength="6">
-                    <button onclick="searchStock()">查询</button>
-                </div>
-
-                <h1 class="section-title">大盘指数</h1>
-                <div class="indices-grid" id="indicesGrid">
-                    <div class="loading">加载中</div>
-                </div>
-
-                <div class="stats-row" id="statsRow"></div>
-
-                <div class="overview-position">
-                    <div id="portfolioSummary" role="status">加载中</div>
-                </div>
-                <details class="card secondary-panel">
-                    <summary>板块 ETF 成交额</summary>
-                    <div id="sectorList"><div class="loading">加载中</div></div>
-                </details>
-            </div>
-
-            <!-- Tab 1: 持仓 -->
-            <div class="tab-content" id="tab-1" role="tabpanel" aria-labelledby="module-tab-1" aria-hidden="true">
-                <section class="portfolio-metrics" aria-label="收益摘要">
-                    <div class="portfolio-metric">
-                        <div class="portfolio-metric-label">总市值</div>
-                        <div class="portfolio-metric-value" id="portfolioMarketValue">—</div>
+                <header class="module-toolbar">
+                    <div class="search-bar">
+                        <input type="text" id="stockSearch" aria-label="股票或 ETF 代码" placeholder="输入股票代码，如 000001" maxlength="6">
+                        <button onclick="searchStock()">查询</button>
                     </div>
-                    <div class="portfolio-metric">
-                        <div class="portfolio-metric-label">仓位</div>
-                        <div class="portfolio-metric-value" id="portfolioHoldingRatio">—</div>
-                        <details id="holdingFundsEditor">
-                            <summary>编辑金额</summary>
-                            <form class="holding-funds-form" onsubmit="saveHoldingFunds(event)">
-                                <input id="holdingFundsInput" type="number" min="0" step="0.01" aria-label="总仓位持有资金" placeholder="金额">
-                                <button type="submit">保存</button>
+                </header>
+
+                <div class="overview-grid">
+                    <section class="overview-market" aria-labelledby="overview-market-heading">
+                        <h2 class="section-title" id="overview-market-heading">大盘指数</h2>
+                        <div class="indices-grid" id="indicesGrid">
+                            <div class="loading">加载中</div>
+                        </div>
+                    </section>
+                    <section class="overview-portfolio" aria-labelledby="overview-portfolio-heading">
+                        <div class="card">
+                            <header class="overview-panel-heading">
+                                <h2 id="overview-portfolio-heading">持仓</h2>
+                                <button type="button" class="quick-btn" onclick="togglePortfolioEdit()">管理持仓</button>
+                            </header>
+                            <section class="portfolio-metrics" aria-label="收益摘要">
+                                <div class="portfolio-metric">
+                                    <div class="portfolio-metric-label">总市值</div>
+                                    <div class="portfolio-metric-value" id="portfolioMarketValue">—</div>
+                                </div>
+                                <div class="portfolio-metric">
+                                    <div class="portfolio-metric-label">仓位</div>
+                                    <div class="portfolio-metric-value" id="portfolioHoldingRatio">—</div>
+                                    <details id="holdingFundsEditor">
+                                        <summary>编辑金额</summary>
+                                        <form class="holding-funds-form" onsubmit="saveHoldingFunds(event)">
+                                            <input id="holdingFundsInput" type="number" min="0" step="0.01" aria-label="总仓位持有资金" placeholder="金额">
+                                            <button type="submit">保存</button>
+                                        </form>
+                                    </details>
+                                </div>
+                                <div class="portfolio-metric">
+                                    <div class="portfolio-metric-label" title="含今日已清仓证券的盈亏">今日盈亏</div>
+                                    <div class="portfolio-metric-value" id="portfolioToday">—</div>
+                                </div>
+                                <div class="portfolio-metric">
+                                    <div class="portfolio-metric-label">累计盈亏</div>
+                                    <div class="portfolio-metric-value" id="portfolioCumulative">—</div>
+                                    <details>
+                                        <summary>明细</summary>
+                                        <p><span>已实现</span><span id="portfolioRealized">—</span></p>
+                                        <p><span>未实现</span><span id="portfolioUnrealized">—</span></p>
+                                    </details>
+                                </div>
+                            </section>
+
+                            <div id="portfolioList"><div class="loading">加载中</div></div>
+                            <div id="portfolioEdit" style="display:none;border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
+                                <div style="font-size:13px;font-weight:500;margin-bottom:8px">补录已有持仓</div>
+                                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                                    <div class="security-picker">
+                                        <input type="text" id="addCode" placeholder="代码或简称" aria-label="持仓证券代码或简称" maxlength="30" autocomplete="off" aria-controls="addCodeSuggestions">
+                                        <div id="addCodeSuggestions" class="security-suggestions" aria-label="匹配证券" hidden></div>
+                                        <span class="security-picker-status" role="status"></span>
+                                    </div>
+                                    <input type="number" id="addCost" placeholder="成本价" step="0.001" style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                    <input type="number" id="addShares" placeholder="数量" style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                    <button onclick="addPosition()" style="padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">添加</button>
+                                </div>
+                                <div style="font-size:13px;font-weight:500;margin-bottom:8px">当前持仓</div>
+                                <div id="portfolioEditList"></div>
+                            </div>
+                        </div>
+
+
+                        <div class="card trade-ledger">
+                            <button type="button" class="quick-btn trade-entry-button" id="tradeEntryButton" aria-controls="tradeForm" aria-expanded="false" onclick="showTradeForm()">记一笔</button>
+                            <details id="tradeLedger">
+                                <summary>交易记录</summary>
+                                <div id="tradesList" style="max-height:300px;overflow-y:auto"><div class="loading">加载中</div></div>
+                            </details>
+                            <div id="tradeForm" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
+                                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                                    <select id="tradeAction" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                        <option value="buy">买入</option>
+                                        <option value="sell">卖出</option>
+                                    </select>
+                                    <div class="security-picker">
+                                        <input type="text" id="tradeCode" placeholder="代码或简称" aria-label="交易证券代码或简称" maxlength="30" autocomplete="off" aria-controls="tradeCodeSuggestions">
+                                        <div id="tradeCodeSuggestions" class="security-suggestions" aria-label="匹配证券" hidden></div>
+                                        <span class="security-picker-status" role="status"></span>
+                                    </div>
+                                    <input type="number" id="tradePrice" placeholder="价格" step="0.001" style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                    <input type="number" id="tradeShares" placeholder="数量" style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
+                                    <button onclick="addTrade()" style="padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">记录</button>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="overview-watch" aria-labelledby="overview-watch-heading">
+                        <div class="card">
+                            <header class="overview-panel-heading"><h2 id="overview-watch-heading">自选</h2></header>
+                            <div class="watch-toolbar watch-heading">
+                                <button type="button" class="quick-btn" id="watchManage" aria-pressed="false" onclick="toggleWatchManagement()">管理</button>
+                                <button type="button" class="quick-btn watch-primary" id="watchAddButton" aria-controls="watchAddPanel" aria-expanded="false" onclick="toggleWatchAdd()">添加</button>
+
+                                <details class="watch-advanced">
+                                    <summary>筛选与排序</summary>
+                                    <div class="watch-toolbar">
+                                        <select id="watchGroupFilter" aria-label="自选分组" onchange="updateWatchlistView()"><option value="all">全部分组</option></select>
+                                        <button type="button" class="quick-btn" id="watchAlertsFilter" aria-pressed="false" onclick="toggleWatchAlerts()">只看预警</button>
+                                        <select id="watchStateFilter" aria-label="行情状态" onchange="updateWatchlistView()">
+                                            <option value="all">全部状态</option><option value="held">只看持仓</option>
+                                            <option value="watch">只看观察</option><option value="up">只看上涨</option>
+                                            <option value="down">只看下跌</option><option value="unavailable">行情不可用</option>
+                                        </select>
+                                        <select id="watchSort" aria-label="自选排序" onchange="updateWatchlistView()">
+                                            <option value="manual">默认顺序</option><option value="change_desc">涨幅从高到低</option>
+                                            <option value="change_asc">跌幅从低到高</option><option value="amount_desc">成交额从高到低</option>
+                                            <option value="volume_ratio_desc">量比从高到低</option>
+                                            <option value="turnover_desc">换手率从高到低</option>
+                                            <option value="stop_near">最接近止损价</option><option value="name">名称排序</option>
+                                        </select>
+                                    </div>
+                                </details>
+                                <span id="watchCount" class="watch-count" role="status"></span>
+                            </div>
+                            <form id="watchAddPanel" class="watch-add-panel" hidden onsubmit="event.preventDefault();addWatch()">
+                                <div class="watch-toolbar">
+                                    <input type="search" id="watchCode" aria-label="自选证券代码或简称" placeholder="代码或简称" maxlength="30" autocomplete="off">
+                                    <button type="submit" class="quick-btn watch-primary">添加</button>
+                                </div>
+                                <div id="watchSuggestions" class="watch-suggestions" hidden></div>
                             </form>
-                        </details>
-                    </div>
-                    <div class="portfolio-metric">
-                        <div class="portfolio-metric-label" title="含今日已清仓证券的盈亏">今日盈亏</div>
-                        <div class="portfolio-metric-value" id="portfolioToday">—</div>
-                    </div>
-                    <div class="portfolio-metric">
-                        <div class="portfolio-metric-label">累计盈亏</div>
-                        <div class="portfolio-metric-value" id="portfolioCumulative">—</div>
-                        <details>
-                            <summary>明细</summary>
-                            <p><span>已实现</span><span id="portfolioRealized">—</span></p>
-                            <p><span>未实现</span><span id="portfolioUnrealized">—</span></p>
-                        </details>
-                    </div>
-                </section>
-
-                <div class="card">
-                    <h3>我的持仓 <button onclick="togglePortfolioEdit()" style="float:right;font-size:12px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:white;cursor:pointer">管理</button></h3>
-                    <div id="portfolioList"><div class="loading">加载中</div></div>
-                    <div id="portfolioEdit" style="display:none;border-top:1px solid var(--border);margin-top:12px;padding-top:12px">
-                        <div style="font-size:13px;font-weight:500;margin-bottom:8px">补录已有持仓</div>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-                            <div class="security-picker">
-                                <input type="text" id="addCode" placeholder="代码或简称" aria-label="持仓证券代码或简称" maxlength="30" autocomplete="off" aria-controls="addCodeSuggestions">
-                                <div id="addCodeSuggestions" class="security-suggestions" aria-label="匹配证券" hidden></div>
-                                <span class="security-picker-status" role="status"></span>
-                            </div>
-                            <input type="number" id="addCost" placeholder="成本价" step="0.001" style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                            <input type="number" id="addShares" placeholder="数量" style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                            <button onclick="addPosition()" style="padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">添加</button>
+                            <div id="watchManageActions" hidden><button type="button" class="quick-btn" onclick="toggleWatchBulkEditor()">批量设置</button></div>
+                            <div id="watchBulkEditor" style="display:none"></div>
+                            <div id="watchlistStocks"><div class="loading">加载中</div></div>
                         </div>
-                        <div style="font-size:13px;font-weight:500;margin-bottom:8px">当前持仓</div>
-                        <div id="portfolioEditList"></div>
-                    </div>
-                </div>
-
-
-            <div class="card trade-ledger">
-                <button type="button" class="quick-btn trade-entry-button" id="tradeEntryButton" aria-controls="tradeForm" aria-expanded="false" onclick="showTradeForm()">记一笔</button>
-                <details id="tradeLedger">
-                    <summary>交易记录</summary>
-                    <div id="tradesList" style="max-height:300px;overflow-y:auto"><div class="loading">加载中</div></div>
-                </details>
-                <div id="tradeForm" style="display:none;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-                    <div style="display:flex;gap:6px;flex-wrap:wrap">
-                        <select id="tradeAction" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                            <option value="buy">买入</option>
-                            <option value="sell">卖出</option>
-                        </select>
-                        <div class="security-picker">
-                                <input type="text" id="tradeCode" placeholder="代码或简称" aria-label="交易证券代码或简称" maxlength="30" autocomplete="off" aria-controls="tradeCodeSuggestions">
-                                <div id="tradeCodeSuggestions" class="security-suggestions" aria-label="匹配证券" hidden></div>
-                                <span class="security-picker-status" role="status"></span>
-                            </div>
-                        <input type="number" id="tradePrice" placeholder="价格" step="0.001" style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                        <input type="number" id="tradeShares" placeholder="数量" style="width:70px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px">
-                        <button onclick="addTrade()" style="padding:6px 12px;background:var(--primary);color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px">记录</button>
-                    </div>
-                </div>
-            </div>
-            </div>
-
-            <!-- Tab 2: 自选 -->
-            <div class="tab-content" id="tab-2" role="tabpanel" aria-labelledby="module-tab-2" aria-hidden="true">
-                <div class="card">
-                    <div class="watch-toolbar watch-heading">
-                        <button type="button" class="quick-btn" id="watchManage" aria-pressed="false" onclick="toggleWatchManagement()">管理</button>
-                        <button type="button" class="quick-btn watch-primary" id="watchAddButton" aria-controls="watchAddPanel" aria-expanded="false" onclick="toggleWatchAdd()">添加</button>
-
-                        <details class="watch-advanced">
-                            <summary>筛选与排序</summary>
-                            <div class="watch-toolbar">
-                                <select id="watchGroupFilter" aria-label="自选分组" onchange="updateWatchlistView()"><option value="all">全部分组</option></select>
-                                <button type="button" class="quick-btn" id="watchAlertsFilter" aria-pressed="false" onclick="toggleWatchAlerts()">只看预警</button>
-                                <select id="watchStateFilter" aria-label="行情状态" onchange="updateWatchlistView()">
-                                    <option value="all">全部状态</option><option value="held">只看持仓</option>
-                                    <option value="watch">只看观察</option><option value="up">只看上涨</option>
-                                    <option value="down">只看下跌</option><option value="unavailable">行情不可用</option>
-                                </select>
-                                <select id="watchSort" aria-label="自选排序" onchange="updateWatchlistView()">
-                                    <option value="manual">默认顺序</option><option value="change_desc">涨幅从高到低</option>
-                                    <option value="change_asc">跌幅从低到高</option><option value="amount_desc">成交额从高到低</option>
-                                    <option value="turnover_desc">换手率从高到低</option><option value="target_near">最接近目标价</option>
-                                    <option value="stop_near">最接近止损价</option><option value="name">名称排序</option>
-                                </select>
-                            </div>
+                        <details class="card secondary-panel">
+                            <summary>板块 ETF 成交额</summary>
+                            <div id="sectorList"><div class="loading">加载中</div></div>
                         </details>
-                        <span id="watchCount" class="watch-count" role="status"></span>
-                    </div>
-                    <form id="watchAddPanel" class="watch-add-panel" hidden onsubmit="event.preventDefault();addWatch()">
-                        <div class="watch-toolbar">
-                            <input type="search" id="watchCode" aria-label="自选证券代码或简称" placeholder="代码或简称" maxlength="30" autocomplete="off">
-                            <button type="submit" class="quick-btn watch-primary">添加</button>
-                        </div>
-                        <div id="watchSuggestions" class="watch-suggestions" hidden></div>
-                    </form>
-                    <div id="watchManageActions" hidden><button type="button" class="quick-btn" onclick="toggleWatchBulkEditor()">批量设置</button></div>
-                    <div id="watchBulkEditor" style="display:none"></div>
-                    <div id="watchlistStocks"><div class="loading">加载中</div></div>
+                    </section>
                 </div>
-
-                <details class="card" id="watchSignals">
-                    <summary>操作建议</summary>
-                    <div id="signalsList"><div class="loading">加载中</div></div>
-                </details>
             </div>
 
             <!-- Tab 3: 板块 -->
@@ -473,7 +448,7 @@
             <!-- Tab 4: 新闻 -->
             <div class="tab-content" id="tab-4" role="tabpanel" aria-labelledby="module-tab-4" aria-hidden="true">
                 <div class="card">
-                    <div style="display:flex;gap:6px;margin:10px 0;flex-wrap:wrap;align-items:center">
+                    <div class="news-toolbar">
                         <input type="text" id="newsSearch" placeholder="搜索关键词" style="flex:1;min-width:120px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px" oninput="renderDailyNews()">
                         <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
                             <input type="checkbox" id="newsOnlyRelated" onchange="renderDailyNews()"> 只看与我相关
@@ -482,12 +457,39 @@
                         <button class="quick-btn" onclick="loadDailyNews()">刷新</button>
                         <button class="quick-btn" onclick="loadDailyNews(true)">AI 判级</button>
                         <small id="newsUpdated" class="watch-count"></small>
+                        <small id="newsVisibleCount" class="watch-count" role="status"></small>
                     </div>
                     <div id="dailyNewsList"><div class="loading">加载中</div></div>
                 </div>
             </div>
 
+            <div class="tab-content" id="tab-6" role="tabpanel" aria-labelledby="module-tab-6" aria-hidden="true">
+                <header class="module-toolbar">
+                    <div class="fundamental-toolbar">
+                        <label for="fundamental-scope">标的范围</label>
+                        <select id="fundamental-scope">
+                            <option value="held">持仓</option>
+                            <option value="watched">自选</option>
+                        </select>
+                        <form id="fundamental-search">
+                            <input type="search" id="fundamental-query" maxlength="30" placeholder="代码或简称" aria-label="证券代码或简称" required>
+                            <button type="submit" class="quick-btn">查询</button>
+                        </form>
+                    </div>
+                </header>
+                <div class="card">
+                    <div id="fundamental-matches" role="status"></div>
+                    <p class="fundamental-meta">点击标的查看基本面明细。</p>
+                    <div id="fundamental-overview"></div>
+                </div>
+                <div id="fundamental-detail" tabindex="-1" aria-live="polite"></div>
+            </div>
+
             <div class="tab-content" id="tab-5" role="tabpanel" aria-labelledby="module-tab-5" aria-hidden="true">
+                <details class="card" id="insightSignals">
+                    <summary>操作建议</summary>
+                    <div id="signalsList"><div class="loading">加载中</div></div>
+                </details>
                 <div class="insight-grid">
                     <div class="card">
                         <h3>统一预警 <span id="alertCount" style="float:right;font-size:10px;color:var(--text-secondary);font-weight:400"></span></h3>
@@ -647,10 +649,10 @@
         function schedulePortfolioRefresh() {
             clearTimeout(portfolioRefreshTimer);
             portfolioRefreshTimer = undefined;
-            if (document.hidden || ![0, 1].includes(activeTab)) return;
+            if (document.hidden || activeTab !== 0) return;
             portfolioRefreshTimer = setTimeout(() => {
                 portfolioRefreshTimer = undefined;
-                if (!document.hidden && [0, 1].includes(activeTab)) runLoader(loadPortfolio);
+                if (!document.hidden && activeTab === 0) runLoader(loadPortfolio);
             }, portfolioPollDelay);
         }
 
@@ -664,12 +666,12 @@
 
         function loadTabData(index) {
             const loaderNames = {
-                0: ['loadMarketOverview', 'loadMarketBreadth', 'loadSectorFlow', 'loadPortfolio'],
-                1: ['refreshPortfolioIfStale', 'loadTrades'],
-                2: ['loadWatchlist', 'loadVisibleSignals'],
+                0: ['loadMarketOverview', 'loadSectorFlow', 'loadPortfolio',
+                    'loadTrades', 'loadWatchlist'],
                 3: ['loadBankNews'],
                 4: ['loadDailyNews'],
-                5: ['loadInsights'],
+                5: ['loadInsights', 'loadVisibleSignals'],
+                6: ['loadFundamentalOverview'],
             };
             let started = false;
             for (const name of loaderNames[index] || []) {
@@ -689,23 +691,27 @@
             activeTab = index;
             const tabs = document.querySelectorAll('.tab-content');
             const btns = document.querySelectorAll('.tab-btn');
-            tabs.forEach((tab, i) => {
-                tab.classList.toggle('active', i === index);
-                tab.setAttribute('aria-hidden', i === index ? 'false' : 'true');
+            tabs.forEach(tab => {
+                const selected = tab.id === `tab-${index}`;
+                tab.classList.toggle('active', selected);
+                tab.setAttribute('aria-hidden', String(!selected));
             });
-            btns.forEach((btn, i) => {
-                btn.classList.toggle('active', i === index);
-                btn.setAttribute('aria-selected', i === index ? 'true' : 'false');
-                btn.tabIndex = i === index ? 0 : -1;
+            btns.forEach(btn => {
+                const selected = btn.getAttribute('aria-controls') === `tab-${index}`;
+                btn.classList.toggle('active', selected);
+                btn.setAttribute('aria-selected', String(selected));
+                btn.tabIndex = selected ? 0 : -1;
             });
             if (changed) window.scrollTo(0, 0);
             if (!loadedTabs.has(index) && loadTabData(index)) {
                 loadedTabs.add(index);
-            } else if (index === 0 || index === 1) {
+            } else if (index === 0) {
                 refreshPortfolioIfStale();
-            } else if (index === 2) {
-                // 自选行情切回页面时立即刷新；若已有请求在途则直接复用。
                 runLoader(window.loadWatchlist, 'loadWatchlist');
+            } else if (index === 5 && changed) {
+                runLoader(loadVisibleSignals);
+            } else if (index === 6 && changed) {
+                runLoader(window.loadFundamentalOverview, 'loadFundamentalOverview');
             }
         }
 
@@ -732,22 +738,6 @@
                 `).join("");
             } catch (e) {
                 document.getElementById("indicesGrid").textContent = "指数加载失败";
-            }
-        }
-
-        async function loadMarketBreadth() {
-            try {
-                const resp = await fetchWithTimeout("/api/market-overview?part=breadth");
-                if (!resp.ok) throw new Error();
-                const {stats} = await resp.json();
-                const fmt = v => (v === null || v === undefined) ? "—" : v;
-                document.getElementById("statsRow").innerHTML = `
-                    <div class="stat-item"><div class="label">上涨</div><div class="value up">${fmt(stats.up)}</div></div>
-                    <div class="stat-item"><div class="label">下跌</div><div class="value down">${fmt(stats.down)}</div></div>
-                    <div class="stat-item"><div class="label">平盘</div><div class="value">${fmt(stats.flat)}</div></div>
-                `;
-            } catch (e) {
-                document.getElementById("statsRow").textContent = "涨跌家数暂不可用";
             }
         }
 
@@ -1012,7 +1002,6 @@
             clearTimeout(portfolioRefreshTimer);
             portfolioRefreshTimer = undefined;
             const list = document.getElementById("portfolioList");
-            const overview = document.getElementById("portfolioSummary");
             const summaryIds = ["portfolioMarketValue", "portfolioHoldingRatio",
                 "portfolioToday", "portfolioCumulative", "portfolioRealized", "portfolioUnrealized"];
             try {
@@ -1042,13 +1031,14 @@
                     ratio(totals.holding_ratio),
                     totals.today_profit == null ? "行情不全" : change(totals.today_profit, "", true),
                     totals.cumulative == null ? "行情不全" : change(totals.cumulative),
-                    change(totals.realized), change(totals.profit),
+                    change(totals.realized), totals.profit == null ? "—" :
+                        `${change(totals.profit)}（${change(totals.profit_pct, "%")}）`,
                 ];
                 summaryIds.forEach((id, index) => { document.getElementById(id).innerHTML = values[index]; });
                 portfolioLastLoadedAt = totals.value == null ? -Infinity : requestedAt;
 
                 if (!data.positions.length) {
-                    list.textContent = overview.textContent = "暂无持仓数据";
+                    list.textContent = "暂无持仓数据";
                     return;
                 }
                 list.innerHTML = `
@@ -1073,12 +1063,10 @@
                     sortPortfolioRows();
                 });
                 sortPortfolioRows();
-                overview.innerHTML = totals.profit == null ? "行情不全" :
-                    `持仓盈亏 ${change(totals.profit)}（${change(totals.profit_pct, "%")}）`;
             } catch (error) {
                 if (requestId !== portfolioRequestId) return;
                 portfolioLastLoadedAt = -Infinity;
-                list.textContent = overview.textContent = `加载失败：${error.message || "请求异常"}`;
+                list.textContent = `加载失败：${error.message || "请求异常"}`;
                 summaryIds.forEach(id => { document.getElementById(id).textContent = "—"; });
             } finally {
                 if (requestId === portfolioRequestId) schedulePortfolioRefresh();
@@ -1086,14 +1074,14 @@
         }
 
         async function refreshWatchlistDependents() {
-            const tasks = [loadWatchlist(), loadVisibleSignals()];
+            const tasks = [loadWatchlist()];
             if (loadedTabs.has(4)) tasks.push(loadDailyNews());
             if (loadedTabs.has(3)) tasks.push(loadBankNews());
             await Promise.all(tasks);
         }
 
         function loadVisibleSignals() {
-            if (document.getElementById("watchSignals").open) return loadSignals();
+            if (activeTab === 5 && document.getElementById("insightSignals").open) return loadSignals();
         }
 
         async function loadSignals() {
@@ -1204,16 +1192,15 @@
                 const rel = data.related_count || 0;
                 document.getElementById("newsUpdated").textContent =
                     (data.updated ? `更新于 ${data.updated}` : "") + (rel ? ` · 相关 ${rel} 条` : "");
-                renderNewsCategories();
                 renderDailyNews();
             } catch (e) {
                 el.innerHTML = `<div style="font-size:12px;color:var(--danger);padding:8px">加载失败: ${escapeHtml(e.message)}</div>`;
             }
         }
 
-        function renderNewsCategories() {
-            const counts = { "全部": _dailyNews.length };
-            _dailyNews.forEach(n => {
+        function renderNewsCategories(news) {
+            const counts = { "全部": news.length };
+            news.forEach(n => {
                 const category = String(n.category || "其他");
                 counts[category] = (counts[category] || 0) + 1;
             });
@@ -1225,7 +1212,6 @@
 
         function setNewsCategory(cat) {
             _newsCategory = cat;
-            renderNewsCategories();
             renderDailyNews();
         }
 
@@ -1252,18 +1238,21 @@
             const q = (document.getElementById("newsSearch").value || "").trim().toLowerCase();
             const onlyRelated = document.getElementById("newsOnlyRelated").checked;
 
-            let list = _dailyNews;
-            if (_newsCategory !== "全部") list = list.filter(n => n.category === _newsCategory);
-            if (onlyRelated) list = list.filter(n => n.related);
+            let list = onlyRelated ? _dailyNews.filter(n => n.related === true) : _dailyNews;
+            renderNewsCategories(list);
+            if (_newsCategory !== "全部") list = list.filter(n => (n.category || "其他") === _newsCategory);
             if (q) list = list.filter(n =>
                 n.title.toLowerCase().includes(q) || (n.summary || "").toLowerCase().includes(q));
 
+            document.getElementById("newsVisibleCount").textContent =
+                `${onlyRelated ? "仅显示相关" : "显示"} ${list.length} 条`;
             if (list.length === 0) {
-                el.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);padding:8px">没有匹配的新闻</div>';
+                const message = onlyRelated ? "没有匹配的持仓或自选相关新闻" : "没有匹配的新闻";
+                el.innerHTML = `<div style="font-size:12px;color:var(--text-secondary);padding:8px">${message}</div>`;
                 return;
             }
 
-            const cards = list.map(n => {
+            const cards = [...list].sort((a, b) => (b.ts || 0) - (a.ts || 0)).map(n => {
                 const url = safeExternalUrl(n.url);
                 const title = escapeHtml(n.title || "");
                 const headline = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${title}</a>` : title;
@@ -1529,7 +1518,14 @@
 
         document.addEventListener("DOMContentLoaded", () => {
             showTab(0);
-            document.querySelector('.module-tabs').addEventListener('keydown', event => {
+            const moduleTabs = document.querySelector('.module-tabs');
+            const narrowLayout = window.matchMedia('(max-width: 760px)');
+            const updateTabOrientation = () => {
+                moduleTabs.setAttribute('aria-orientation', narrowLayout.matches ? 'horizontal' : 'vertical');
+            };
+            updateTabOrientation();
+            narrowLayout.addEventListener('change', updateTabOrientation);
+            moduleTabs.addEventListener('keydown', event => {
                 const buttons = [...event.currentTarget.querySelectorAll('.tab-btn')];
                 const current = buttons.indexOf(event.target);
                 let next;
@@ -1552,21 +1548,19 @@
                         return;
                 }
                 event.preventDefault();
-                showTab(next);
+                showTab(Number(buttons[next].getAttribute('aria-controls').slice(4)));
                 buttons[next].focus();
             });
-            scheduleVisibleRefresh(loadMarketOverview, 3 * 60 * 1000, [0]);
-            scheduleVisibleRefresh(loadMarketBreadth, 3 * 60 * 1000, [0]);
+            scheduleVisibleRefresh(loadMarketOverview, 15 * 1000, [0]);
             document.getElementById("sectorList").closest("details").addEventListener("toggle", () => runLoader(loadSectorFlow));
-            scheduleVisibleRefresh(loadSectorFlow, 5 * 60 * 1000, [0]);
-            scheduleVisibleRefresh(loadVisibleSignals, 5 * 60 * 1000, [2]);
+            scheduleVisibleRefresh(loadSectorFlow, 10 * 60 * 1000, [0]);
+            scheduleVisibleRefresh(loadVisibleSignals, 5 * 60 * 1000, [5]);
             // 与后端15秒行情缓存对齐，避免自选涨跌幅长期滞后。
-            scheduleVisibleRefresh(loadWatchlist, 15 * 1000, [2]);
+            scheduleVisibleRefresh(loadWatchlist, 15 * 1000, [0]);
             document.addEventListener('visibilitychange', () => {
                 if (document.hidden || !loadedTabs.has(activeTab)) return;
-                if (activeTab === 0 || activeTab === 1) {
+                if (activeTab === 0) {
                     refreshPortfolioIfStale();
-                } else if (activeTab === 2) {
                     runLoader(window.loadWatchlist, 'loadWatchlist');
                 }
             });
@@ -1618,7 +1612,42 @@
         .tag { display:inline-block; padding:1px 7px; border-radius:10px; background:#f3ede3; color:var(--text-secondary); font-size:10px; margin-right:4px; }
         .watch-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
         .watch-heading { margin-bottom:12px; }
-        .overview-position { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-top:1px solid var(--border); }
+        #tab-0 { container-type: inline-size; }
+        .overview-market > .section-title, .overview-panel-heading h2 {
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: normal;
+        }
+        .overview-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+        .overview-grid .card { border: 1px solid var(--border); margin-bottom: 14px; }
+        .portfolio-table thead th { background: #f5f0e7; }
+        .portfolio-table th:first-child, .portfolio-table td:first-child { padding-left: 8px; }
+        .portfolio-metric-value {
+            font-size: 16px;
+            font-weight: 500;
+        }
+        .index-card .price { font: 500 clamp(17px, 2.5vw, 26px)/1.25 Georgia, "Songti SC", serif; }
+        .index-card .price, .index-card .change, .portfolio-metric-value,
+        .portfolio-table tbody td:not(:first-child), .watch-table tbody td:nth-child(n + 2):nth-child(-n + 4) {
+            font-variant-numeric: tabular-nums;
+        }
+        .overview-grid {
+            --overview-data-size: 13px;
+            --overview-label-size: 12px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 16px;
+            align-items: start;
+        }
+        .overview-grid > section { min-width: 0; }
+        @container (max-width: 590px) {
+            .overview-grid .portfolio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @container (min-width: 940px) {
+            .overview-grid { grid-template-columns: minmax(0, 2.2fr) minmax(270px, 1fr); }
+            .overview-market { grid-column: 1 / -1; }
+        }
         .secondary-panel { margin:8px 0; }
         .secondary-panel > summary { cursor:pointer; padding:6px 0; font-weight:500; }
         .news-row { padding:14px 0; border-bottom:1px solid #eae6e0; line-height:1.5; }
@@ -1636,26 +1665,28 @@
         .watch-primary { color:white; background:var(--primary); border-color:var(--primary); }
         .signal-row { padding:7px 0; border-bottom:1px solid var(--border); font-size:12px; }
         .signal-row small { color:var(--text-secondary); }
-        .watch-advanced summary, #watchSignals summary { cursor:pointer; color:var(--text-secondary); }
+        .watch-advanced summary, #insightSignals summary { cursor:pointer; color:var(--text-secondary); }
         .watch-advanced .watch-toolbar { padding:5px 0; }
         .watch-add-panel { border:1px solid var(--border); border-radius:8px; padding:10px; margin-top:10px; }
         .watch-suggestions { max-height:210px; overflow:auto; margin-top:7px; }
         .watch-suggestions button { display:block; width:100%; padding:7px 8px; border:0; border-top:1px solid var(--border); background:var(--card-bg); color:var(--text); cursor:pointer; text-align:left; }
         .watch-suggestions button:hover, .watch-suggestions button:focus-visible { background:var(--primary-light); }
         #watchManageActions, #watchBulkEditor { margin-top:10px; }
+        #watchBulkEditor { overflow-x:auto; }
         .watch-table-wrap { margin-top:10px; overflow-x:auto; }
-        .watch-table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+        .watch-table { width:100%; border-collapse:collapse; font-size:var(--overview-data-size); font-variant-numeric:tabular-nums; }
         .watch-table th, .watch-table td { padding:10px 8px; text-align:right; white-space:nowrap; border-bottom:1px solid var(--border); }
-        .watch-table th { font-size:12px; font-weight:500; color:var(--text-secondary); }
+        .watch-table th { font-size:var(--overview-label-size); font-weight:500; color:var(--text-secondary); }
         .watch-table th:first-child, .watch-table td:first-child { text-align:left; padding-left:0; }
         .watch-table small, .watch-empty { color:var(--text-secondary); }
         .watch-table tbody td { padding-block:14px; border-bottom-color:#eae6e0; }
-        .watch-table tbody td:nth-child(2), .watch-table tbody td:nth-child(3), .watch-table tbody td:nth-child(5) { font-family:Consolas, monospace; }
         .watch-ticker small { display:block; font-size:11px; text-align:left; }
         .watch-empty { margin-top:12px; font-size:13px; }
         .watch-ticker { border:0; background:transparent; font:inherit; color:var(--text); cursor:pointer; text-align:left; }
         .watch-ticker:hover { color:var(--primary); }
-        .watch-alert { display:inline-block; margin-left:4px; border-radius:5px; padding:2px 6px; background:var(--primary-light); color:var(--primary); font-size:11px; }
+        .watch-alert { display:inline-block; margin-left:4px; border-radius:5px; padding:2px 6px; background:var(--primary-light); color:var(--primary); font:11px system-ui, sans-serif; }
+        .watch-row-alerts, .watch-volume-total { display:block; margin-top:4px; }
+        .watch-row-alerts .watch-alert { margin:0 4px 0 0; }
         .watch-bulk-grid { display:grid; grid-template-columns:80px minmax(130px,1fr) repeat(5,75px); gap:5px; }
         .watch-bulk-grid > * { min-width:0; }
         .stock-modal { display:none; position:fixed; inset:0; z-index:2000; background:rgba(20,28,38,.45); align-items:center; justify-content:center; padding:18px; }
@@ -1670,7 +1701,7 @@
         @media (max-width: 920px) {
             .watch-bulk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
-        @media (max-width:700px) {
+        @media (max-width:760px) {
             .insight-grid { grid-template-columns:1fr; }
             .metric-grid { grid-template-columns:1fr 1fr; }
             .dashboard-toolbar, .tab-content { padding-inline:12px; }
@@ -1706,7 +1737,7 @@
 
         async function refreshPortfolioDependents() {
             const tasks = [
-                loadPortfolio(), loadTrades(), loadWatchlist(), loadVisibleSignals(), loadAlerts(),
+                loadPortfolio(), loadTrades(), loadWatchlist(), loadAlerts(),
             ];
             const editor = document.getElementById('portfolioEditList');
             if (editor && editor.offsetParent !== null) tasks.push(loadPortfolioEditList());
@@ -1718,6 +1749,24 @@
         function fmtNum(value, digits=2) {
             const n = Number(value);
             return Number.isFinite(n) ? n.toFixed(digits) : "--";
+        }
+
+        function formatQuoteVolume(stock) {
+            const volume = stock.volume;
+            if (!Number.isFinite(volume)) return "—";
+            const unit = stock.volume_unit === "股" ? "股" : "手";
+            if (volume >= 1e8) return `${fmtNum(volume / 1e8)} 亿${unit}`;
+            if (volume >= 1e4) return `${fmtNum(volume / 1e4)} 万${unit}`;
+            return `${volume.toLocaleString("zh-CN")} ${unit}`;
+        }
+
+        function formatVolumeRatio(value) {
+            return Number.isFinite(value) ? `${fmtNum(value)} 倍` : "—";
+        }
+
+        function formatWatchVolume(stock) {
+            return `${formatVolumeRatio(stock.volume_ratio)}
+                <small class="watch-volume-total">${formatQuoteVolume(stock)}</small>`;
         }
 
         function pnlHtml(value, suffix="") {
@@ -1766,6 +1815,8 @@
                         <div class="metric-box"><div class="label">最高 / 最低</div><div class="value">${fmtNum(s.high,3)} / ${fmtNum(s.low,3)}</div></div>
                         <div class="metric-box"><div class="label">PE / PB</div><div class="value">${fmtNum(s.pe)} / ${fmtNum(s.pb)}</div></div>
                         <div class="metric-box"><div class="label">换手率 / 成交额</div><div class="value">${fmtNum(s.turnover)}% / ${formatWatchAmount(s.amount)}</div></div>
+                        <div class="metric-box"><div class="label">成交量</div><div class="value">${formatQuoteVolume(s)}</div></div>
+                        <div class="metric-box"><div class="label">量比</div><div class="value">${formatVolumeRatio(s.volume_ratio)}</div></div>
                     </div>
                     ${chart}
                     <div class="metric-grid">
@@ -1775,7 +1826,13 @@
                         <div class="metric-box"><div class="label">阶段回撤</div><div class="value">${fmtNum(i.drawdown_pct)}%</div></div>
                     </div>
                     <div style="font-size:12px;line-height:1.8"><b>客观观察：</b>${(data.observations || []).map(escHtml).join('；') || '指标数据不足'}</div>
-                    ${holding}${watch}`;
+                    ${holding}${watch}
+                    <p><button type="button" class="quick-btn" id="stockFundamentalLink">查看基本面</button></p>`;
+                document.getElementById("stockFundamentalLink").onclick = () => {
+                    closeStockDetail();
+                    openFundamental(symbol, market);
+                    document.getElementById("fundamental-detail").focus();
+                };
             } catch (e) {
                 body.innerHTML = `<div style="color:var(--danger);font-size:13px;padding:15px">${escHtml(e.message)}</div>`;
             }
@@ -1851,8 +1908,8 @@
                 change_desc: (a, b) => numeric(b, 'change_pct', -Infinity) - numeric(a, 'change_pct', -Infinity),
                 change_asc: (a, b) => numeric(a, 'change_pct', Infinity) - numeric(b, 'change_pct', Infinity),
                 amount_desc: (a, b) => numeric(b, 'amount', -Infinity) - numeric(a, 'amount', -Infinity),
+                volume_ratio_desc: (a, b) => numeric(b, 'volume_ratio', -Infinity) - numeric(a, 'volume_ratio', -Infinity),
                 turnover_desc: (a, b) => numeric(b, 'turnover', -Infinity) - numeric(a, 'turnover', -Infinity),
-                target_near: (a, b) => Math.abs(numeric(a, 'target_distance_pct', Infinity)) - Math.abs(numeric(b, 'target_distance_pct', Infinity)),
                 stop_near: (a, b) => numeric(a, 'stop_distance_pct', Infinity) - numeric(b, 'stop_distance_pct', Infinity),
                 name: (a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'),
             };
@@ -1870,22 +1927,22 @@
             el.innerHTML = `<div class="watch-table-wrap" tabindex="0" role="region" aria-label="自选行情">
                 <table class="watch-table">
                     <thead><tr><th scope="col">证券</th><th scope="col">现价</th><th scope="col">涨跌幅</th>
-                    <th scope="col">关注状态</th><th scope="col">距目标价</th>${managing ? '<th scope="col">操作</th>' : ''}</tr></thead>
+                    <th scope="col" title="上方为量比，下方为当日累计成交量。">量能</th>
+                    <th scope="col">换手率</th>
+                    ${managing ? '<th scope="col">操作</th>' : ''}</tr></thead>
                     <tbody>${items.map(stock => {
                         const code = safeSecurityCode(stock.code);
                         const market = safeMarket(stock.market);
-                        const distance = stock.target_distance_pct;
                         const labels = (stock.alerts || []).map(alert => alert.label);
-                        if (distance > 0 && distance <= 3) labels.push("接近目标");
                         const alerts = labels.map(label => `<span class="watch-alert">${escHtml(label)}</span>`).join("");
-                        const status = stock.quote_available ? (stock.is_portfolio ? "持仓" : "观察中") : "行情不可用";
-                        const target = distance == null ? "—" : (stock.alerts || []).some(a => a.kind === "target") ? "已达到" : `${fmtNum(distance)}%`;
+                        const name = escHtml(stock.name);
                         return `<tr>
-                            <td><button type="button" class="watch-ticker" onclick="openStockDetail('${code}','${market}')">${escHtml(stock.name)} <small>${escHtml(market.toUpperCase())}${code}</small></button></td>
+                            <td><button type="button" class="watch-ticker" onclick="openStockDetail('${code}','${market}')">${stock.is_portfolio ? `<strong>${name}</strong>` : name} <small>${escHtml(market.toUpperCase())}${code}</small></button>
+                                ${alerts ? `<div class="watch-row-alerts">${alerts}</div>` : ""}</td>
                             <td>${stock.quote_available ? fmtNum(stock.price, 3) : "—"}</td>
                             <td>${stock.quote_available ? pnlHtml(stock.change_pct, "%") : "—"}</td>
-                            <td><small>${status}</small>${alerts}</td>
-                            <td>${target}</td>
+                            <td>${formatWatchVolume(stock)}</td>
+                            <td>${Number.isFinite(stock.turnover) ? `${fmtNum(stock.turnover)}%` : "—"}</td>
                             ${managing ? `<td>${stock.is_watchlisted ? `<button type="button" class="quick-btn" onclick="toggleWatchBulkEditor('${code}','${market}')">设置</button>` : '—'}</td>` : ''}
                         </tr>`;
                     }).join("")}</tbody>
@@ -1893,11 +1950,14 @@
             </div>`;
         };
 
+        let watchlistRequestId = 0;
         window.loadWatchlist = async function() {
+            const requestId = ++watchlistRequestId;
             const el = document.getElementById("watchlistStocks");
             try {
                 const resp = await fetch("/api/watchlist", {cache: "no-store"});
                 const data = await resp.json();
+                if (requestId !== watchlistRequestId) return;
                 if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
                 window._watchlistItems = Array.isArray(data.stocks) ? data.stocks : [];
                 const updated = data.updated_at ? new Date(data.updated_at) : null;
@@ -1909,6 +1969,7 @@
                 };
                 renderWatchlist();
             } catch (error) {
+                if (requestId !== watchlistRequestId) return;
                 if ((window._watchlistItems || []).length) {
                     window._watchlistMeta = {...(window._watchlistMeta || {}), stale: true};
                     renderWatchlist();
@@ -2130,11 +2191,12 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             enhanceDashboard();
-            document.getElementById("watchSignals").addEventListener("toggle", () => {
+            document.getElementById("insightSignals").addEventListener("toggle", () => {
                 runLoader(loadVisibleSignals, "操作建议");
             });
             scheduleVisibleRefresh(loadInsights, 5 * 60 * 1000, [5]);
         });
     </script>
+    <script src="{{ url_for('static', filename='fundamentals.js') }}"></script>
 </body>
 </html>

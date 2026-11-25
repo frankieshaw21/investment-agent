@@ -1,0 +1,42 @@
+.fundamental-toolbar, #fundamental-search, .fundamental-matches {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.fundamental-toolbar { margin-bottom: 12px; }
+.fundamental-toolbar label { font-size: 13px; }
+.fundamental-toolbar input, .fundamental-toolbar select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    background: var(--card-bg);
+    color: var(--text);
+    font: inherit;
+    max-width: 100%;
+}
+.fundamental-table-wrap { overflow-x: auto; }
+.fundamental-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+.fundamental-table th, .fundamental-table td {
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: right;
+    white-space: nowrap;
+}
+.fundamental-table th { color: var(--text-secondary); font-weight: 600; }
+.fundamental-table th:first-child, .fundamental-table td:first-child { text-align: left; padding-left: 0; }
+.fundamental-table .fundamental-note { white-space: normal; min-width: 145px; }
+.fundamental-ticker { border: 0; background: transparent; color: var(--primary); cursor: pointer; font: inherit; }
+.fundamental-ticker:hover, .fundamental-ticker[aria-current="true"] { text-decoration: underline; }
+.fundamental-meta { color: var(--text-secondary); font-size: 12px; margin: 7px 0; }
+.fundamental-observation { font-size: 14px; line-height: 1.6; margin: 8px 0; }
+.fundamental-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 12px; }
+.fundamental-notes { font-size: 13px; line-height: 1.6; padding-left: 20px; }
+.fundamental-notes li + li { margin-top: 6px; }
+.fundamental-sources { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+.fundamental-sources a { color: var(--primary); }

@@ -36,6 +36,7 @@ F_AMOUNT = 37       # 成交额(万元)
 F_TURNOVER = 38     # 换手率
 F_PE = 39
 F_PB = 46
+F_VOLUME_RATIO = 49  # 沪深北行情字段，港股同位置为 52 周最低价
 
 
 def _session():

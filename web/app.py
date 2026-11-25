@@ -31,6 +31,7 @@ _ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(_ENV_FILE)
 
 from tools import quote as _quote
+from tools import fundamentals
 from tools.portfolio_tracker import SnapshotQuoteError, record_daily_snapshot
 from tools.trading_calendar import MARKET_TZ, RISK_CHECK_TIMES, cached_trading_day, is_trading_day
 
@@ -741,7 +742,13 @@ def api_daily_news():
             _analyze_news_sentiment(related + hot)
             news_list.sort(key=lambda x: (x["related"], x["hot"], x["ts"]), reverse=True)
         else:
-            news_list = news_list[:count]
+            visible = news_list[:count]
+            if count > 1 and all(n["related"] for n in visible):
+                # 相关报道占满列表时，保留少量市场新闻供浏览。
+                market = [n for n in news_list[count:] if not n["related"]][:min(6, count // 2)]
+                if market:
+                    visible = visible[:-len(market)] + market
+            news_list = visible
 
         # 8) 持仓情绪概览：只统计“与持仓/自选相关”的已判级新闻，才代表“对你的影响”
         counts = {"非常利好": 0, "利好": 0, "中性": 0, "利空": 0, "非常利空": 0}
@@ -936,9 +943,9 @@ def _realized_profit(trades=None):
 
 
 def _portfolio_refresh_delay(portfolio, now):
-    """Use 15-second polling while quotes can move and 2 minutes otherwise."""
+    """Use 15-second polling while quotes can move and 10 minutes otherwise."""
     if now.weekday() >= 5 or not portfolio:
-        return 120
+        return 600
 
     markets = {_quote.code_prefix(f"{item.get('market') or ''}{code}")[:2]
                for code, item in portfolio.items()}
@@ -950,7 +957,7 @@ def _portfolio_refresh_delay(portfolio, now):
         # 港股包含延续早市，统一使用工作日的全日交易窗口。
         sessions.append(((9, 0), (16, 11)))
 
-    delay = 120
+    delay = 600
     for (start_hour, start_minute), (end_hour, end_minute) in sessions:
         start = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
         end = now.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
@@ -1260,7 +1267,7 @@ def _optional_float(value):
     return number
 
 
-def _fields_info(fields):
+def _fields_info(fields, *, turnover_default=0.0):
     def num(index, default=0.0):
         try:
             return float(fields[index]) if len(fields) > index and fields[index] else default
@@ -1272,7 +1279,20 @@ def _fields_info(fields):
         "price": num(3), "prev_close": num(4), "open": num(5),
         "volume": num(6), "change_amt": num(31), "change_pct": num(32),
         "high": num(33), "low": num(34), "amount": num(37),
-        "turnover": num(38), "pe": num(39, None), "pb": num(46, None),
+        "turnover": num(_quote.F_TURNOVER, turnover_default), "pe": num(39, None), "pb": num(46, None),
+    }
+
+
+def _quote_volume_metrics(fields, symbol):
+    def nonnegative(index):
+        value = _quote._safe_float(fields[index], None) if len(fields) > index else None
+        return value if value is not None and math.isfinite(value) and value >= 0 else None
+
+    is_hk = symbol.startswith("hk")
+    return {
+        "volume": nonnegative(_quote.F_VOLUME),
+        "volume_unit": "股" if is_hk else "手",
+        "volume_ratio": None if is_hk else nonnegative(_quote.F_VOLUME_RATIO),
     }
 
 
@@ -1371,7 +1391,7 @@ def api_watchlist():
     for item in watchlist:
         symbol = _watch_symbol(item)
         fields = quotes.get(symbol)
-        info = _fields_info(fields) if fields else {}
+        info = _fields_info(fields, turnover_default=None) if fields else {}
         price = info.get("price") if fields else None
         prev_close = info.get("prev_close") if fields else None
         quote_available = bool(price and price > 0 and prev_close and prev_close > 0)
@@ -1384,6 +1404,7 @@ def api_watchlist():
         alert_up_pct = configured_number(item, "alert_up_pct")
         alert_down_pct = configured_number(item, "alert_down_pct")
         change_pct = info.get("change_pct") if quote_available else None
+        turnover = info.get("turnover") if quote_available else None
         alerts = []
         target_distance_pct = None
         stop_distance_pct = None
@@ -1408,6 +1429,7 @@ def api_watchlist():
             amplitude_pct = (info["high"] - info["low"]) / prev_close * 100
 
         stock = dict(item)
+        stock.update(_quote_volume_metrics(fields if quote_available else (), symbol))
         stock.update({
             "name": info.get("name") or item.get("name", item["code"]),
             "market": item.get("market") or symbol[:2],
@@ -1421,7 +1443,7 @@ def api_watchlist():
             "change_pct": round(change_pct, 2) if quote_available else None,
             "amplitude_pct": round(amplitude_pct, 2) if amplitude_pct is not None else None,
             "amount": round(info.get("amount", 0), 2) if quote_available else None,
-            "turnover": round(info.get("turnover", 0), 2) if quote_available else None,
+            "turnover": round(turnover, 2) if turnover is not None and math.isfinite(turnover) and turnover >= 0 else None,
             "target_distance_pct": round(target_distance_pct, 2) if target_distance_pct is not None else None,
             "stop_distance_pct": round(stop_distance_pct, 2) if stop_distance_pct is not None else None,
             "alerts": alerts,
@@ -1634,6 +1656,7 @@ def api_stock_detail(symbol):
     if not fields:
         return jsonify({"error": f"未找到 {symbol} 的行情"}), 404
     stock = _fields_info(fields)
+    stock.update(_quote_volume_metrics(fields, prefix))
     stock["market"] = {"sh": "沪市", "sz": "深市", "bj": "北交所", "hk": "港股"}.get(prefix[:2], "")
 
     raw = _quote.get_klines_raw(prefix, days)
@@ -1676,6 +1699,43 @@ def api_stock_detail(symbol):
         observations.append("价格位于20日均线上方" if stock["price"] >= indicators["ma20"] else "价格位于20日均线下方")
     return jsonify({"stock": stock, "klines": klines, "indicators": indicators,
                     "holding": holding, "watch": watch, "observations": observations})
+
+
+def _fundamental_symbol(code, market):
+    if not market and code.startswith("920") and len(code) == 6:
+        return "bj" + code
+    return _market_symbol(code, market)
+
+
+@app.get("/api/fundamentals")
+def api_fundamental_universe():
+    """Local holdings and watchlist without fetching market prices."""
+    universe = {}
+    for scope, items in (("held", _load_portfolio_data()), ("watched", _load_watchlist())):
+        for item in items:
+            code = str(item.get("code", "")).strip()
+            if not _valid_symbol(code):
+                continue
+            symbol = _fundamental_symbol(code, item.get("market"))
+            entry = universe.setdefault(symbol, {
+                "code": code, "market": symbol[:2], "name": item.get("name") or code,
+                "held": False, "watched": False,
+            })
+            entry[scope] = True
+    return jsonify({"items": list(universe.values())})
+
+
+@app.get("/api/fundamentals/<code>")
+def api_fundamentals(code):
+    market = request.args.get("market", "").strip().lower()
+    if not _valid_symbol(code) or market not in ("", "sh", "sz", "bj", "hk"):
+        return jsonify({"error": "证券代码或市场格式有误"}), 400
+    symbol = _fundamental_symbol(code, market)
+    try:
+        result = fundamentals.analyze(symbol, summary=request.args.get("view") == "summary")
+    except fundamentals.FundamentalsUnavailable as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"code": code, "market": symbol[:2], **result})
 
 
 def _portfolio_health_data():
